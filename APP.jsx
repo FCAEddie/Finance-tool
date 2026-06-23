@@ -1488,7 +1488,6 @@ function Scenarios() {
         </div>
       </Card>
     </div>
-  </>
   );
 }
 
