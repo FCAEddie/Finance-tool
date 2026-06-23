@@ -11,7 +11,7 @@ import {
   LayoutDashboard, TableProperties, TrendingUp, BarChart2,
   ChevronDown, ChevronRight, Upload, Plus, Pencil, Trash2,
   X, CheckCircle, AlertCircle, Info, ArrowUpRight, ArrowDownRight,
-  FileText, Settings, Download
+  FileText, Settings, Download, Sliders, MessageCircle, Send
 } from "lucide-react";
 
 // ─── Embedded Financial Data ──────────────────────────────────────────────────
@@ -38,6 +38,7 @@ const isActualMonth = (yr, mi) => yr === 2026 && mi <= ACTUALS_THRU;
 const getRowData = (row, year) => year === 2026 ? row.v26 : year === 2027 ? row.v27 : row.v28;
 const isTotal = (a) => a.startsWith("Total ") || a === "Gross Profit" || a === "Net Income" || a === "Net Operating Income" || a === "Total Other Expenses";
 const isHeader = (a) => ["Income","Cost of Goods Sold","Expenses","Other Expenses","Net Other Income"].includes(a) || a.startsWith("Check");
+const displayLabel = (a) => a === "Other Expenses" ? "Depreciation & Amortization" : a;
 
 // ─── FCA Logo ─────────────────────────────────────────────────────────────────
 const FCALogo = ({ size = 36 }) => (
@@ -81,9 +82,9 @@ const getMonthlyChart = (year) => {
 
 // ─── Color theme ─────────────────────────────────────────────────────────────
 const C = {
-  bg: "#030c1f",
-  card: "#0a1628",
-  cardBorder: "#1e3a6e",
+  bg: "#0f172a",
+  card: "#1e293b",
+  cardBorder: "#334155",
   accent: "#2563eb",
   accentLight: "#3b82f6",
   actual: "#ffffff",
@@ -143,9 +144,37 @@ const Badge = ({ children, color = C.accent }) => (
 // ─── Page: Dashboard ──────────────────────────────────────────────────────────
 function Dashboard({ onNav }) {
   const [selYear, setSelYear] = useState(2026);
-  const kpi = getAnnualKPIs(selYear);
-  const prevKpi = selYear > 2026 ? getAnnualKPIs(selYear - 1) : null;
-  const chartData = getMonthlyChart(selYear);
+  const [period, setPeriod] = useState("Full Year");
+  const [selMonthIdx, setSelMonthIdx] = useState(0);
+
+  const getKPIsForPeriod = (year) => {
+    const k = KPIS_ALL[String(year)];
+    if (!k) return {};
+    const slice = (arr) => {
+      if (period === "YTD") return arr.slice(0, 5);
+      if (period === "Monthly") return [arr[selMonthIdx] || 0];
+      return arr;
+    };
+    const rev = sum(slice(k.rev));
+    const cogs = sum(slice(k.cogs));
+    const gp = sum(slice(k.gp));
+    const exp = sum(slice(k.exp));
+    const ni = sum(slice(k.ni));
+    const ebitda = sum(slice(k.ebitda));
+    return { revenue: rev, cogs, grossProfit: gp, expenses: exp, netIncome: ni, ebitda,
+      gpMargin: rev ? gp / rev : 0, niMargin: rev ? ni / rev : 0 };
+  };
+
+  const kpi = getKPIsForPeriod(selYear);
+  const prevKpi = selYear > 2026 ? getKPIsForPeriod(selYear - 1) : null;
+
+  const getChartDataForPeriod = (year) => {
+    const full = getMonthlyChart(year);
+    if (period === "YTD") return full.slice(0, 5);
+    if (period === "Monthly") return [full[selMonthIdx]].filter(Boolean);
+    return full;
+  };
+  const chartData = getChartDataForPeriod(selYear);
 
   const ytChange = (curr, prev) => prev && prev !== 0 ? (curr - prev) / Math.abs(prev) : null;
 
@@ -170,6 +199,23 @@ function Dashboard({ onNav }) {
         </div>
       </div>
 
+      {/* Period Selector */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {["Full Year", "YTD", "Monthly"].map(p => (
+          <button key={p} onClick={() => setPeriod(p)}
+            style={{ padding: "5px 14px", borderRadius: 8, border: `1px solid ${period === p ? C.accent : C.cardBorder}`,
+              background: period === p ? C.accent : "transparent", color: C.actual, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            {p}{p === "YTD" ? " (Jan–May)" : ""}
+          </button>
+        ))}
+        {period === "Monthly" && (
+          <select value={selMonthIdx} onChange={e => setSelMonthIdx(parseInt(e.target.value))}
+            style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, color: C.actual, padding: "5px 10px", fontSize: 12 }}>
+            {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+          </select>
+        )}
+      </div>
+
       {/* KPI Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
         <KPICard label="Total Revenue" value={kpi.revenue} compact
@@ -184,27 +230,42 @@ function Dashboard({ onNav }) {
           change={prevKpi ? ytChange(kpi.netIncome, prevKpi.netIncome) : null} />
       </div>
 
-      {/* Monthly Revenue / Expense Chart */}
+      {/* Monthly Revenue vs Plan Chart */}
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ color: C.actual, margin: 0, fontSize: 15 }}>Monthly Performance – {selYear}</h3>
+          <h3 style={{ color: C.actual, margin: 0, fontSize: 15 }}>Revenue vs Plan – {selYear}</h3>
           <div style={{ display: "flex", gap: 12, fontSize: 11 }}>
-            <span style={{ color: C.textDim }}>● Actual</span>
-            <span style={{ color: C.projection }}>● Projected</span>
+            <span style={{ color: "#2563eb" }}>■ Revenue</span>
+            {selYear === 2026 && <span style={{ color: "#f97316" }}>— Plan</span>}
           </div>
         </div>
-        <ResponsiveContainer width="100%" height={280}>
-          <ComposedChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e3a6e" />
-            <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
-            <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
-            <Tooltip formatter={(v, n) => [fmt(v), n]} contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8 }} labelStyle={{ color: C.actual }} />
-            <Legend wrapperStyle={{ color: C.textDim, fontSize: 12 }} />
-            <Bar dataKey="Revenue" fill="#2563eb" opacity={0.9} radius={[3,3,0,0]} />
-            <Line type="monotone" dataKey="Gross Profit" stroke="#22c55e" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="Net Income" stroke="#f59e0b" strokeWidth={2} dot={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
+        {(() => {
+          const planRevData = selYear === 2026
+            ? (() => {
+                const planByMonth = MONTHS.map((_, mi) =>
+                  UNIFIED_PL.filter(r => r.type === "revenue").reduce((acc, r) => acc + (r.plan26?.[mi] || 0), 0)
+                );
+                return (period === "YTD" ? planByMonth.slice(0, 5) : period === "Monthly" ? [planByMonth[selMonthIdx]] : planByMonth);
+              })()
+            : null;
+          const revChartData = chartData.map((d, i) => ({
+            ...d,
+            Plan: planRevData ? planRevData[i] || 0 : undefined,
+          }));
+          return (
+            <ResponsiveContainer width="100%" height={280}>
+              <ComposedChart data={revChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
+                <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
+                <Tooltip formatter={(v, n) => [fmt(v), n]} contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8 }} labelStyle={{ color: C.actual }} />
+                <Legend wrapperStyle={{ color: C.textDim, fontSize: 12 }} />
+                <Bar dataKey="Revenue" fill="#2563eb" opacity={0.9} radius={[3,3,0,0]} />
+                {selYear === 2026 && <Line type="monotone" dataKey="Plan" stroke="#f97316" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
+              </ComposedChart>
+            </ResponsiveContainer>
+          );
+        })()}
       </Card>
 
       {/* 3-Year Annual Summary Table */}
@@ -506,7 +567,6 @@ function Projections() {
   const [customRows, setCustomRows] = useState([]);
   const [addModal, setAddModal] = useState(false);
   const [newRow, setNewRow] = useState({ a: "", type: "expense", v: Array(12).fill(0) });
-  const [growthRates, setGrowthRates] = useState({ rev: { 2027: 8, 2028: 17 }, exp: { 2027: 5, 2028: 10 } });
   const [saveFeedback, setSaveFeedback] = useState(null);
 
   // Get key rows only for editing
@@ -557,29 +617,12 @@ function Projections() {
         </div>
       </div>
 
-      {/* Growth Rate Controls */}
-      <Card>
-        <h3 style={{ color: C.actual, margin: "0 0 12px", fontSize: 14 }}>Growth Assumptions</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-          {[
-            { label: "Revenue Growth 2027", key: "rev", yr: 2027 },
-            { label: "Expense Growth 2027", key: "exp", yr: 2027 },
-            { label: "Revenue Growth 2028", key: "rev", yr: 2028 },
-            { label: "Expense Growth 2028", key: "exp", yr: 2028 },
-          ].map(({ label, key, yr }) => (
-            <div key={`${key}${yr}`}>
-              <div style={{ color: C.textDim, fontSize: 11, marginBottom: 4 }}>{label}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <input type="number" value={growthRates[key][yr]}
-                  onChange={e => setGrowthRates(g => ({ ...g, [key]: { ...g[key], [yr]: parseFloat(e.target.value) } }))}
-                  style={{ width: 60, background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
-                    color: C.actual, padding: "4px 8px", fontSize: 13 }} />
-                <span style={{ color: C.textDim, fontSize: 13 }}>%</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
+      {/* Data-driven note */}
+      <div style={{ background: "#1e293b", border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 16px",
+        display: "flex", alignItems: "center", gap: 8 }}>
+        <Info size={14} style={{ color: C.projection, flexShrink: 0 }} />
+        <span style={{ color: C.textDim, fontSize: 12 }}>Projections based on 2026 Plan (Jun–Dec) and historical trend analysis. Data sourced from UNIFIED_PL plan arrays.</span>
+      </div>
 
       {saveFeedback && (
         <div style={{ background: "#16a34a22", border: "1px solid #16a34a55", borderRadius: 8, padding: "10px 16px", color: "#4ade80", fontSize: 13 }}>
@@ -977,9 +1020,15 @@ function Transactions({ filterAccount, filterMonth }) {
           <div>
             <label style={{ color: C.textDim, fontSize: 12, display: "block", marginBottom: 4 }}>Filter by GL Account</label>
             <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+              list="gl-account-list"
               placeholder="e.g. 802000 Badging or Credit Card"
               style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 8,
                 color: C.actual, padding: "8px 12px", fontSize: 13, boxSizing: "border-box" }} />
+            <datalist id="gl-account-list">
+              {UNIFIED_PL.filter(r => !isHeader(r.a) && !isTotal(r.a)).map(r => (
+                <option key={r.a} value={r.a} />
+              ))}
+            </datalist>
           </div>
           <div>
             <label style={{ color: C.textDim, fontSize: 12, display: "block", marginBottom: 4 }}>Month</label>
@@ -1030,9 +1079,352 @@ function Transactions({ filterAccount, filterMonth }) {
   );
 }
 
+
+// ─── FCA Data Assistant (Chat Widget) ────────────────────────────────────────
+function FCAAssistant() {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([
+    { role: "bot", text: "Hi! I'm the FCA Data Assistant. Ask me about revenue, expenses, plan vs actuals, or net income." }
+  ]);
+  const [input, setInput] = useState("");
+  const messagesEndRef = useRef();
+
+  const getBotResponse = (q) => {
+    const lower = q.toLowerCase();
+    const k26 = KPIS_ALL["2026"];
+    if (!k26) return "Data not available.";
+
+    if (lower.includes("ytd revenue") || (lower.includes("ytd") && lower.includes("revenue"))) {
+      const ytd = sum(k26.rev.slice(0, 5));
+      return `YTD Revenue (Jan–May 2026): ${fmt(ytd)} — tracking across 5 actual months.`;
+    }
+    if (lower.includes("revenue")) {
+      const total = sum(k26.rev);
+      return `Full Year 2026 Revenue (plan): ${fmt(total, true)}. YTD (Jan–May actual): ${fmt(sum(k26.rev.slice(0, 5)), true)}.`;
+    }
+    if (lower.includes("vs plan") || lower.includes("plan")) {
+      const revRows = UNIFIED_PL.filter(r => r.type === "revenue");
+      const planYTD = revRows.reduce((acc, r) => acc + (r.plan26 ? r.plan26.slice(0, 5).reduce((a, b) => a + b, 0) : 0), 0);
+      const actYTD = sum(k26.rev.slice(0, 5));
+      const diff = actYTD - planYTD;
+      return `YTD Revenue vs Plan: Actual ${fmt(actYTD, true)} vs Plan ${fmt(planYTD, true)} — ${diff >= 0 ? "+" : ""}${fmt(diff, true)} (${((diff/planYTD)*100).toFixed(1)}%).`;
+    }
+    if (lower.includes("expense") || lower.includes("cost")) {
+      const totalExp = sum(k26.exp);
+      const ytdExp = sum(k26.exp.slice(0, 5));
+      const biggest = UNIFIED_PL.filter(r => r.type === "expense" && !isTotal(r.a) && !isHeader(r.a))
+        .map(r => ({ a: r.a, total: sum(r.v26) }))
+        .sort((a, b) => b.total - a.total)[0];
+      return `2026 YTD Expenses: ${fmt(ytdExp, true)}. Largest expense line: ${biggest?.a} (${fmt(biggest?.total, true)} annual).`;
+    }
+    if (lower.includes("net income") || lower.includes("profit") || lower.includes("bottom line")) {
+      const ytd = sum(k26.ni.slice(0, 5));
+      const full = sum(k26.ni);
+      return `YTD Net Income (Jan–May 2026): ${fmt(ytd, true)}. Full year plan: ${fmt(full, true)}.`;
+    }
+    if (lower.includes("ebitda")) {
+      const ytd = sum(k26.ebitda.slice(0, 5));
+      const full = sum(k26.ebitda);
+      return `YTD Adj. EBITDA (Jan–May 2026): ${fmt(ytd, true)}. Full year: ${fmt(full, true)}.`;
+    }
+    if (lower.includes("gross profit") || lower.includes("gross margin")) {
+      const ytd = sum(k26.gp.slice(0, 5));
+      const ytdRev = sum(k26.rev.slice(0, 5));
+      return `YTD Gross Profit: ${fmt(ytd, true)} (${((ytd/ytdRev)*100).toFixed(1)}% margin).`;
+    }
+    return "I can help with questions about FCA's revenue, expenses, plan vs actuals, and more. Try asking about YTD Revenue, vs Plan, Top Expenses, or Net Income.";
+  };
+
+  const send = () => {
+    if (!input.trim()) return;
+    const userMsg = { role: "user", text: input.trim() };
+    const botMsg = { role: "bot", text: getBotResponse(input.trim()) };
+    setMessages(prev => [...prev, userMsg, botMsg]);
+    setInput("");
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+  };
+
+  const chips = ["YTD Revenue", "vs Plan", "Top Expenses", "Net Income"];
+
+  return (
+    <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 1000, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+      {open && (
+        <div style={{ width: 320, height: 440, background: C.card, border: `1px solid ${C.accent}55`,
+          borderRadius: 16, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+          {/* Header */}
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.cardBorder}`,
+            display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <MessageCircle size={16} style={{ color: C.accent }} />
+              <span style={{ color: C.actual, fontSize: 13, fontWeight: 700 }}>FCA Data Assistant</span>
+            </div>
+            <button onClick={() => setOpen(false)}
+              style={{ background: "none", border: "none", color: C.muted, cursor: "pointer" }}>
+              <X size={16} />
+            </button>
+          </div>
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {messages.map((m, i) => (
+              <div key={i} style={{
+                alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                background: m.role === "user" ? C.accent : "#0f172a",
+                color: C.actual, borderRadius: 10, padding: "8px 12px", fontSize: 12,
+                maxWidth: "85%", lineHeight: 1.5 }}>
+                {m.text}
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+          {/* Suggested chips */}
+          <div style={{ padding: "8px 14px", display: "flex", gap: 6, flexWrap: "wrap", borderTop: `1px solid ${C.cardBorder}33` }}>
+            {chips.map(c => (
+              <button key={c} onClick={() => { setInput(c); }}
+                style={{ padding: "3px 10px", borderRadius: 12, border: `1px solid ${C.cardBorder}`,
+                  background: "transparent", color: C.textDim, cursor: "pointer", fontSize: 10 }}>
+                {c}
+              </button>
+            ))}
+          </div>
+          {/* Input */}
+          <div style={{ padding: "10px 14px", borderTop: `1px solid ${C.cardBorder}`, display: "flex", gap: 8 }}>
+            <input value={input} onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && send()}
+              placeholder="Ask about revenue, expenses..."
+              style={{ flex: 1, background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 8,
+                color: C.actual, padding: "6px 10px", fontSize: 12 }} />
+            <button onClick={send}
+              style={{ background: C.accent, border: "none", borderRadius: 8, color: "white",
+                padding: "6px 10px", cursor: "pointer", display: "flex", alignItems: "center" }}>
+              <Send size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+      <button onClick={() => setOpen(o => !o)}
+        style={{ width: 48, height: 48, borderRadius: "50%", background: C.accent, border: "none",
+          color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: "0 4px 16px rgba(37,99,235,0.5)" }}>
+        <MessageCircle size={22} />
+      </button>
+    </div>
+  );
+}
+
+
+// ─── Page: Scenarios ─────────────────────────────────────────────────────────
+function Scenarios() {
+  const defaultChecked = new Set(WISH_LIST.filter(w => w.status === "plan").map(w => w.id));
+  const [checked, setChecked] = useState(defaultChecked);
+
+  const toggle = (id) => setChecked(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const applyScenario = (name) => {
+    if (name === "Base") setChecked(new Set());
+    else if (name === "Current Plan") setChecked(new Set(WISH_LIST.filter(w => w.status === "plan").map(w => w.id)));
+    else if (name === "Stretch") setChecked(new Set(WISH_LIST.map(w => w.id)));
+  };
+
+  const wishAdd = Array.from(checked).reduce((acc, id) => {
+    const item = WISH_LIST.find(w => w.id === id);
+    return acc + (item ? item.annualCost : 0);
+  }, 0);
+
+  const baseKPIs = (yr) => getAnnualKPIs(yr);
+  const YEARS3 = [2026, 2027, 2028];
+
+  const priorityColors = {
+    "Keep Lights On": "#60a5fa",
+    "Revenue Growth": "#4ade80",
+    "Product": "#a78bfa",
+    "Retention": "#f59e0b",
+    "Security": "#f87171",
+    "Operations": "#94a3b8",
+    "Leadership": "#e879f9",
+    "Innovation": "#34d399",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Scenarios & Wish List</h2>
+      </div>
+
+      {/* Scenario Presets */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <span style={{ color: C.textDim, fontSize: 12 }}>Quick scenarios:</span>
+        {["Base", "Current Plan", "Stretch"].map(sc => (
+          <button key={sc} onClick={() => applyScenario(sc)}
+            style={{ padding: "6px 16px", borderRadius: 8, border: `1px solid ${C.cardBorder}`,
+              background: sc === "Current Plan" ? C.accent : "transparent",
+              color: C.actual, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            {sc}
+          </button>
+        ))}
+      </div>
+
+      {/* 3-Year P&L Impact Table */}
+      <Card>
+        <h3 style={{ color: C.actual, margin: "0 0 14px", fontSize: 15 }}>3-Year P&L Impact</h3>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              <th style={{ textAlign: "left", color: C.textDim, padding: "8px 12px", fontWeight: 500 }}>Metric</th>
+              {YEARS3.map(yr => (
+                <th key={yr} style={{ textAlign: "right", color: yr === 2026 ? C.actual : C.projection, padding: "8px 12px", fontWeight: 600 }}>{yr}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              { label: "Revenue", key: "revenue" },
+              { label: "COGS", key: "cogs" },
+              { label: "Gross Profit", key: "grossProfit" },
+              { label: "OpEx", key: "expenses" },
+              { label: "EBITDA", key: "ebitda" },
+              { label: "Net Income", key: "netIncome" },
+            ].map(({ label, key }) => (
+              <tr key={key} style={{ borderBottom: `1px solid ${C.cardBorder}22`,
+                background: key === "netIncome" || key === "grossProfit" ? C.totalBg : "transparent",
+                fontWeight: key === "netIncome" ? 700 : 400 }}>
+                <td style={{ padding: "10px 12px", color: C.text }}>{label}</td>
+                {YEARS3.map(yr => (
+                  <td key={yr} style={{ textAlign: "right", padding: "10px 12px", color: yr === 2026 ? C.actual : C.projection }}>
+                    {fmt(baseKPIs(yr)[key], true)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            <tr style={{ borderBottom: `1px solid ${C.cardBorder}22`, background: "#f97316" + "22" }}>
+              <td style={{ padding: "10px 12px", color: "#f97316", fontWeight: 600 }}>Wish List Add</td>
+              {YEARS3.map(yr => (
+                <td key={yr} style={{ textAlign: "right", padding: "10px 12px", color: "#f97316" }}>
+                  {fmt(wishAdd, true)}
+                </td>
+              ))}
+            </tr>
+            <tr style={{ borderBottom: `1px solid ${C.cardBorder}22`, background: C.totalBg, fontWeight: 700 }}>
+              <td style={{ padding: "10px 12px", color: C.actual, fontWeight: 700 }}>Adj. Net Income</td>
+              {YEARS3.map(yr => {
+                const adjNI = baseKPIs(yr).netIncome - wishAdd;
+                return (
+                  <td key={yr} style={{ textAlign: "right", padding: "10px 12px",
+                    color: adjNI >= 0 ? C.positive : C.negative, fontWeight: 700 }}>
+                    {fmt(adjNI, true)}
+                  </td>
+                );
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </Card>
+
+      {/* Wish List Table */}
+      <Card style={{ padding: 0 }}>
+        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.cardBorder}` }}>
+          <h3 style={{ color: C.actual, margin: 0, fontSize: 15 }}>Wish List Items</h3>
+          <div style={{ color: C.textDim, fontSize: 11, marginTop: 4 }}>
+            {checked.size} of {WISH_LIST.length} items active — Total: {fmt(wishAdd, true)} annual
+          </div>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: "#0d1f3c" }}>
+                <th style={{ padding: "10px 12px", textAlign: "center", color: C.textDim, width: 36 }}>✓</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", color: C.textDim }}>Name</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", color: C.textDim }}>Requester</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", color: C.textDim }}>Category</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", color: C.textDim }}>Priority</th>
+                <th style={{ padding: "10px 12px", textAlign: "center", color: C.textDim }}>Start</th>
+                <th style={{ padding: "10px 12px", textAlign: "right", color: C.textDim }}>Annual Cost</th>
+                <th style={{ padding: "10px 12px", textAlign: "center", color: C.textDim }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {WISH_LIST.map(item => {
+                const isActive = checked.has(item.id);
+                const isUnplanned = item.status === "unplanned_ask";
+                return (
+                  <tr key={item.id}
+                    style={{ borderBottom: `1px solid ${C.cardBorder}22`,
+                      background: isUnplanned ? "rgba(234,179,8,0.08)" : "transparent",
+                      opacity: isActive ? 1 : 0.5 }}
+                    onClick={() => toggle(item.id)}>
+                    <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                      <input type="checkbox" checked={isActive} onChange={() => toggle(item.id)}
+                        style={{ cursor: "pointer", accentColor: C.accent }} />
+                    </td>
+                    <td style={{ padding: "8px 12px", color: C.text, fontWeight: isActive ? 500 : 400 }}>{item.name}</td>
+                    <td style={{ padding: "8px 12px", color: C.textDim }}>{item.requester}</td>
+                    <td style={{ padding: "8px 12px", color: C.textDim }}>{item.category}</td>
+                    <td style={{ padding: "8px 12px" }}>
+                      <span style={{ color: priorityColors[item.priority] || C.textDim, fontSize: 11, fontWeight: 600 }}>
+                        {item.priority}
+                      </span>
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "center", color: C.textDim }}>{item.startMonth}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: isActive ? C.actual : C.textDim, fontWeight: 600 }}>
+                      {fmt(item.annualCost)}
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                      <span style={{
+                        padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600,
+                        background: isUnplanned ? "rgba(234,179,8,0.2)" : "rgba(34,197,94,0.15)",
+                        color: isUnplanned ? "#eab308" : C.positive
+                      }}>
+                        {isUnplanned ? "Unplanned Ask" : "Plan"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+
+// ─── Wish List Data ──────────────────────────────────────────────────────────
+const WISH_LIST = [
+  { id:1, name:"HubSpot Renewal Uptick", requester:"Caitlin", category:"Software", priority:"Keep Lights On", startMonth:"Sep", annualCost:10000, status:"plan", type:"expense" },
+  { id:2, name:"AGC CA", requester:"Caitlin", category:"Marketing", priority:"Revenue Growth", startMonth:"Jan", annualCost:5000, status:"plan", type:"expense" },
+  { id:3, name:"Dialer Tool for BDRs", requester:"Caitlin", category:"Software", priority:"Revenue Growth", startMonth:"Jan", annualCost:5000, status:"plan", type:"expense" },
+  { id:4, name:"T&E (above baseline)", requester:"Eddie", category:"Travel", priority:"Revenue Growth", startMonth:"Jan", annualCost:50000, status:"plan", type:"expense" },
+  { id:5, name:"Regional Account Executive #1", requester:"Caitlin", category:"Headcount", priority:"Revenue Growth", startMonth:"Jun", annualCost:150000, status:"plan", type:"expense" },
+  { id:6, name:"Full-Time Tech Writer", requester:"Madigan/Rizzo", category:"Headcount", priority:"Product", startMonth:"Jan", annualCost:125000, status:"plan", type:"expense" },
+  { id:7, name:"Customer Help/KB Platform", requester:"Madigan/Rizzo", category:"Software", priority:"Keep Lights On", startMonth:"Jul", annualCost:5000, status:"plan", type:"expense" },
+  { id:8, name:"Replacement Aged Hardware", requester:"Melanie", category:"Hardware", priority:"Keep Lights On", startMonth:"Apr", annualCost:133000, status:"plan", type:"expense" },
+  { id:9, name:"FCA Bonus/Merit Pool", requester:"Team", category:"Compensation", priority:"Retention", startMonth:"Jan", annualCost:500000, status:"plan", type:"expense" },
+  { id:10, name:"Crowdstrike Active Monitoring", requester:"Rizzo", category:"Security", priority:"Keep Lights On", startMonth:"Jan", annualCost:44000, status:"plan", type:"expense" },
+  { id:11, name:"3rd Party Security Scanning", requester:"Rizzo", category:"Security", priority:"Keep Lights On", startMonth:"Jul", annualCost:50000, status:"plan", type:"expense" },
+  { id:12, name:"Tech Team Training", requester:"Rizzo", category:"Training", priority:"Keep Lights On", startMonth:"May", annualCost:30000, status:"plan", type:"expense" },
+  { id:13, name:"QA Analyst", requester:"Rizzo", category:"Headcount", priority:"Revenue Growth", startMonth:"Jul", annualCost:40000, status:"plan", type:"expense" },
+  { id:14, name:"QA Automation", requester:"Rizzo", category:"Software", priority:"Revenue Growth", startMonth:"Jan", annualCost:18000, status:"plan", type:"expense" },
+  { id:15, name:"Secure Legacy Backup System", requester:"Rizzo", category:"Security", priority:"Keep Lights On", startMonth:"Jan", annualCost:75000, status:"plan", type:"expense" },
+  { id:16, name:"Fractional CISO", requester:"Rizzo", category:"Headcount", priority:"Security", startMonth:"Jan", annualCost:120000, status:"plan", type:"expense" },
+  { id:17, name:"Managed Service Provider (MSP)", requester:"Rizzo", category:"IT Services", priority:"Keep Lights On", startMonth:"Mar", annualCost:108000, status:"plan", type:"expense" },
+  { id:18, name:"CTO", requester:"Reid/Rizzo", category:"Headcount", priority:"Leadership", startMonth:"Jul", annualCost:200000, status:"plan", type:"expense" },
+  { id:19, name:"Claude AI Seats", requester:"Madigan/Rizzo", category:"Software", priority:"Innovation", startMonth:"Mar", annualCost:12800, status:"plan", type:"expense" },
+  { id:20, name:"Memory Blue Extension", requester:"Caitlin", category:"Sales", priority:"Revenue Growth", startMonth:"Jun", annualCost:119000, status:"plan", type:"expense" },
+  { id:21, name:"Director of Product Marketing", requester:"Caitlin", category:"Headcount", priority:"Revenue Growth", startMonth:"TBD", annualCost:200000, status:"unplanned_ask", type:"expense" },
+  { id:22, name:"Technical Operations Manager", requester:"Rizzo", category:"Headcount", priority:"Operations", startMonth:"Apr", annualCost:150000, status:"unplanned_ask", type:"expense" },
+  { id:23, name:"AE Recruitment Fee", requester:"Caitlin", category:"Recruiting", priority:"Revenue Growth", startMonth:"Jun", annualCost:30000, status:"plan", type:"expense" },
+  { id:24, name:"CTO Recruitment Fee", requester:"Rizzo", category:"Recruiting", priority:"Leadership", startMonth:"Jul", annualCost:40000, status:"plan", type:"expense" },
+  { id:25, name:"Marketing Recruiting Fee", requester:"Caitlin", category:"Recruiting", priority:"Revenue Growth", startMonth:"Sep", annualCost:28000, status:"unplanned_ask", type:"expense" },
+];
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("dashboard");
+  const [fontSize, setFontSize] = useState("md");
   const [txFilter, setTxFilter] = useState({ account: null, month: null });
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -1049,10 +1441,20 @@ export default function App() {
     { id: "avb-summary", label: "Actuals vs Budget", icon: BarChart2, sub: "Summary" },
     { id: "avb-detail", label: "Actuals vs Budget", icon: BarChart2, sub: "Detail" },
     { id: "transactions", label: "Transactions", icon: FileText },
+    { id: "scenarios", label: "Scenarios", icon: Sliders },
   ];
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: "'Inter', 'Segoe UI', sans-serif", color: C.text }}>
+    <>
+    <style>{`
+      [data-fs="sm"] { font-size: 12px; }
+      [data-fs="md"] { font-size: 14px; }
+      [data-fs="lg"] { font-size: 16px; }
+      [data-fs="sm"] table, [data-fs="sm"] td, [data-fs="sm"] th { font-size: 11px; }
+      [data-fs="md"] table, [data-fs="md"] td, [data-fs="md"] th { font-size: 12px; }
+      [data-fs="lg"] table, [data-fs="lg"] td, [data-fs="lg"] th { font-size: 14px; }
+    `}</style>
+    <div data-fs={fontSize} style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: "'Inter', 'Segoe UI', sans-serif", color: C.text }}>
       {/* Sidebar */}
       <aside style={{ width: sidebarOpen ? 220 : 56, background: "#050e1f", borderRight: `1px solid ${C.cardBorder}`,
         flexShrink: 0, display: "flex", flexDirection: "column", transition: "width 0.2s" }}>
@@ -1108,6 +1510,16 @@ export default function App() {
             </h1>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              {["sm","md","lg"].map((sz, idx) => (
+                <button key={sz} onClick={() => setFontSize(sz)}
+                  style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${fontSize === sz ? C.accent : C.cardBorder}`,
+                    background: fontSize === sz ? C.accent : "transparent", color: C.actual, cursor: "pointer",
+                    fontSize: 11, fontWeight: 600 }}>
+                  {["S","M","L"][idx]}
+                </button>
+              ))}
+            </div>
             <Badge color={C.positive}>Actuals through May 2026</Badge>
             <div style={{ color: C.textDim, fontSize: 11 }}>FY 2026–2028</div>
           </div>
@@ -1120,7 +1532,11 @@ export default function App() {
         {page === "avb-summary" && <AvBSummary />}
         {page === "avb-detail" && <AvBDetail />}
         {page === "transactions" && <Transactions filterAccount={txFilter.account} filterMonth={txFilter.month} />}
+        {page === "scenarios" && <Scenarios />}
       </main>
+      {/* Floating AI Chat Widget */}
+      <FCAAssistant />
     </div>
+    </>
   );
 }
