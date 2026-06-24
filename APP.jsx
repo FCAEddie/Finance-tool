@@ -455,13 +455,11 @@ function Dashboard({ onNav }) {
 }
 
 // ─── Page: Full P&L ───────────────────────────────────────────────────────────
-function FullPL({ onNav, onSelectTx }) {
+function FullPL({ onNav, onSelectTx, approvedItems }) {
   const C = useC();
   const [year, setYear] = useState(2026);
   const [expanded, setExpanded] = useState(new Set(["Income","Expenses","Cost of Goods Sold"]));
   const [modal, setModal] = useState(null);
-  const [uploadMsg, setUploadMsg] = useState(null);
-  const fileRef = useRef();
 
   const toggle = (a) => setExpanded(prev => {
     const next = new Set(prev);
@@ -485,20 +483,29 @@ function FullPL({ onNav, onSelectTx }) {
     return vis;
   }, [expanded]);
 
-  const handleCellClick = (row, monthIdx) => {
-    const isAct = isActualMonth(year, monthIdx);
-    if (isAct) {
-      setModal({ type: "transaction", row, month: monthIdx, year });
-    } else {
-      setModal({ type: "projection", row, month: monthIdx, year });
-    }
+  const getCategoryForGL = (glName) => {
+    if (!glName) return null;
+    const lower = glName.toLowerCase();
+    if (lower.includes("software") || lower.includes("saas") || lower.includes("subscript")) return "Software";
+    if (lower.includes("headcount") || lower.includes("salary") || lower.includes("wage") || lower.includes("payroll")) return "Headcount";
+    if (lower.includes("market")) return "Marketing";
+    if (lower.includes("travel") || lower.includes("t&e") || lower.includes("expense")) return "Travel";
+    if (lower.includes("security")) return "Security";
+    if (lower.includes("hardware")) return "Hardware";
+    if (lower.includes("training")) return "Training";
+    if (lower.includes("recruit")) return "Recruiting";
+    if (lower.includes("compensat") || lower.includes("bonus")) return "Compensation";
+    return null;
   };
 
-  const handleUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploadMsg(`✓ "${file.name}" staged. Refresh actuals to include new month data.`);
-    setTimeout(() => setUploadMsg(null), 5000);
+  const handleCellClick = (row, monthIdx) => {
+    if (isActualMonth(year, monthIdx)) {
+      // Direct drill-through to transactions
+      onSelectTx && onSelectTx(row.a, monthIdx);
+    } else {
+      // Show projection info modal
+      setModal({ type: "projection", row, month: monthIdx, year });
+    }
   };
 
   return (
@@ -514,19 +521,9 @@ function FullPL({ onNav, onSelectTx }) {
               {yr}
             </button>
           ))}
-          <button onClick={() => fileRef.current.click()}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8,
-              border: `1px solid ${C.cardBorder}`, background: "transparent", color: C.textDim, cursor: "pointer", fontSize: 12 }}>
-            <Upload size={13} /> Upload Actuals
-          </button>
-          <input ref={fileRef} type="file" accept=".xlsx,.csv" style={{ display: "none" }} onChange={handleUpload} />
+
         </div>
       </div>
-      {uploadMsg && (
-        <div style={{ background: "#16a34a22", border: "1px solid #16a34a55", borderRadius: 8, padding: "10px 16px", color: "#4ade80", fontSize: 13 }}>
-          <CheckCircle size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />{uploadMsg}
-        </div>
-      )}
       <div style={{ fontSize: 11, color: C.textDim }}>
         <span style={{ color: C.actual }}>■</span> Actuals (Jan–May 2026) &nbsp;&nbsp;
         <span style={{ color: C.projection }}>■</span> Projections &nbsp;&nbsp;
@@ -544,7 +541,10 @@ function FullPL({ onNav, onSelectTx }) {
                   <th key={m} style={{ textAlign: "right", padding: "10px 8px", fontWeight: 500, minWidth: 80,
                     color: isActualMonth(year, i) ? C.actual : C.projection,
                     borderLeft: i === 5 && year === 2026 ? `2px dashed ${C.cardBorder}` : "none" }}>
-                    {m}{i > ACTUALS_THRU && year === 2026 && <span style={{display:"block",fontSize:9,color:C.projection}}>Proj</span>}
+                    {isActualMonth(year, i)
+                      ? <span style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:3}}>{m}<span style={{fontSize:9,opacity:0.7}}>🔒</span></span>
+                      : m}
+                    {i > ACTUALS_THRU && year === 2026 && <span style={{display:"block",fontSize:9,color:C.projection}}>Proj</span>}
                   </th>
                 ))}
                 <th style={{ textAlign: "right", padding: "10px 8px", color: C.textDim, minWidth: 90 }}>Total</th>
@@ -609,27 +609,12 @@ function FullPL({ onNav, onSelectTx }) {
       </Card>
 
       {/* Modals */}
-      {modal?.type === "transaction" && (
-        <Modal title={`Transactions – ${modal.row.a} – ${MONTHS[modal.month]} ${modal.year}`} onClose={() => setModal(null)}>
-          <div style={{ color: C.textDim, fontSize: 13, marginBottom: 16 }}>
-            <Info size={14} style={{ verticalAlign: "middle", marginRight: 6, color: C.accentLight }} />
-            Transaction detail for <strong style={{ color: C.actual }}>{modal.row.a}</strong> in <strong style={{ color: C.actual }}>{MONTHS[modal.month]} {modal.year}</strong>.
-          </div>
-          <div style={{ background: C.bg, borderRadius: 8, padding: 16, marginBottom: 12 }}>
-            <div style={{ color: C.actual, fontWeight: 700, fontSize: 18 }}>{fmt(getRowData(modal.row, modal.year)?.[modal.month])}</div>
-            <div style={{ color: C.textDim, fontSize: 12, marginTop: 4 }}>Recorded actuals for this GL code</div>
-          </div>
-          <div style={{ color: C.textDim, fontSize: 12 }}>
-            To view individual transactions: open the corresponding monthly file in the <code style={{color:C.projection}}>Legacy/</code> folder
-            and filter by <code style={{color:C.actual}}>{modal.row.a}</code>.
-          </div>
-          <button onClick={() => { setModal(null); onSelectTx(modal.row.a, modal.month); }}
-            style={{ marginTop: 16, padding: "8px 16px", borderRadius: 8, background: C.accent, border: "none", color: "white", cursor: "pointer", fontSize: 13 }}>
-            <FileText size={13} style={{ verticalAlign: "middle", marginRight: 6 }} />Open Transaction Viewer
-          </button>
-        </Modal>
-      )}
-      {modal?.type === "projection" && (
+      {modal?.type === "projection" && (() => {
+        const cat = getCategoryForGL(modal.row.a);
+        const relatedItems = (approvedItems || []).filter(w =>
+          cat && w.category && w.category.toLowerCase() === cat.toLowerCase()
+        );
+        return (
         <Modal title={`Projection Detail – ${modal.row.a} – ${MONTHS[modal.month]} ${modal.year}`} onClose={() => setModal(null)}>
           <div style={{ color: C.textDim, fontSize: 13, marginBottom: 16 }}>
             <TrendingUp size={14} style={{ verticalAlign: "middle", marginRight: 6, color: C.projection }} />
@@ -661,12 +646,27 @@ function FullPL({ onNav, onSelectTx }) {
               ))}
             </tbody>
           </table>
+          {relatedItems.length > 0 && (
+            <div style={{ marginTop: 16, padding: 12, background: "#1e3a6e33", borderRadius: 8, border: `1px solid ${C.accent}44` }}>
+              <div style={{ color: C.actual, fontWeight: 600, fontSize: 12, marginBottom: 8 }}>
+                Approved Scenario Items ({cat})
+              </div>
+              {relatedItems.map(item => (
+                <div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0",
+                  borderBottom: `1px solid ${C.cardBorder}22`, fontSize: 12 }}>
+                  <span style={{ color: C.text }}>{item.name}</span>
+                  <span style={{ color: C.projection, fontWeight: 600 }}>{fmt(item.annualCost)}/yr</span>
+                </div>
+              ))}
+            </div>
+          )}
           <button onClick={() => { setModal(null); onNav("projections"); }}
             style={{ marginTop: 16, padding: "8px 16px", borderRadius: 8, background: C.accent, border: "none", color: "white", cursor: "pointer", fontSize: 13 }}>
             <Pencil size={13} style={{ verticalAlign: "middle", marginRight: 6 }} />Edit Projections
           </button>
         </Modal>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -1110,6 +1110,11 @@ function Transactions({ filterAccount, filterMonth }) {
   const [glFilter, setGlFilter] = useState(filterAccount || "");
   const [selMonth, setSelMonth] = useState(filterMonth != null ? filterMonth : -1);
   const [sortKey, setSortKey] = useState("d");
+
+  React.useEffect(() => {
+    if (filterAccount) setGlFilter(filterAccount);
+    if (filterMonth != null && filterMonth >= 0) setSelMonth(filterMonth);
+  }, [filterAccount, filterMonth]);
   const [sortDir, setSortDir] = useState(-1);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 100;
@@ -1354,10 +1359,97 @@ function FCAAssistant() {
 
 
 // ─── Page: Scenarios ─────────────────────────────────────────────────────────
-function Scenarios() {
+// ─── WishListForm Component ───────────────────────────────────────────────────
+function WishListForm({ item, onSave, onCancel }) {
   const C = useC();
-  const defaultChecked = new Set(WISH_LIST.filter(w => w.status === "plan").map(w => w.id));
+  const [form, setForm] = React.useState(item || {
+    name: "", requester: "", category: "", priority: "Keep Lights On",
+    startMonth: "Jan", annualCost: 0, status: "plan", type: "expense"
+  });
+  const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+  const PRIORITIES = ["Keep Lights On","Revenue Growth","Product","Retention","Security","Operations","Leadership","Innovation"];
+  const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","TBD"];
+  const CATEGORIES = ["Software","Headcount","Marketing","Travel","Security","Hardware","Training","Recruiting","Compensation","IT Services","Sales","Other"];
+
+  return (
+    <div style={{ background: "#0d1f3c", border: `1px solid ${C.accent}44`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
+      <h4 style={{ color: C.actual, margin: "0 0 14px", fontSize: 14 }}>{item ? "Edit Item" : "Add New Item"}</h4>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Name *</label>
+          <input value={form.name} onChange={e => set("name", e.target.value)}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13, boxSizing: "border-box" }} />
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Requester</label>
+          <input value={form.requester} onChange={e => set("requester", e.target.value)}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13, boxSizing: "border-box" }} />
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Category</label>
+          <select value={form.category} onChange={e => set("category", e.target.value)}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13 }}>
+            <option value="">Select...</option>
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Priority</label>
+          <select value={form.priority} onChange={e => set("priority", e.target.value)}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13 }}>
+            {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Start Month</label>
+          <select value={form.startMonth} onChange={e => set("startMonth", e.target.value)}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13 }}>
+            {MONTHS_SHORT.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Annual Cost ($)</label>
+          <input type="number" value={form.annualCost} onChange={e => set("annualCost", Number(e.target.value))}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13, boxSizing: "border-box" }} />
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Status</label>
+          <select value={form.status} onChange={e => set("status", e.target.value)}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13 }}>
+            <option value="plan">Plan</option>
+            <option value="unplanned_ask">Unplanned Ask</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        <button onClick={() => form.name.trim() && onSave(form)}
+          style={{ padding: "8px 20px", borderRadius: 8, background: C.accent, border: "none",
+            color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+          {item ? "Save Changes" : "Add Item"}
+        </button>
+        <button onClick={onCancel}
+          style={{ padding: "8px 16px", borderRadius: 8, background: "transparent",
+            border: `1px solid ${C.cardBorder}`, color: C.textDim, cursor: "pointer", fontSize: 13 }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds }) {
+  const C = useC();
+  const defaultChecked = new Set((wishList || WISH_LIST).filter(w => w.status === "plan").map(w => w.id));
   const [checked, setChecked] = useState(defaultChecked);
+  const [editingItem, setEditingItem] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
 
   const toggle = (id) => setChecked(prev => {
     const next = new Set(prev);
@@ -1367,12 +1459,12 @@ function Scenarios() {
 
   const applyScenario = (name) => {
     if (name === "Base") setChecked(new Set());
-    else if (name === "Current Plan") setChecked(new Set(WISH_LIST.filter(w => w.status === "plan").map(w => w.id)));
-    else if (name === "Stretch") setChecked(new Set(WISH_LIST.map(w => w.id)));
+    else if (name === "Current Plan") setChecked(new Set((wishList || WISH_LIST).filter(w => w.status === "plan").map(w => w.id)));
+    else if (name === "Stretch") setChecked(new Set((wishList || WISH_LIST).map(w => w.id)));
   };
 
   const wishAdd = Array.from(checked).reduce((acc, id) => {
-    const item = WISH_LIST.find(w => w.id === id);
+    const item = (wishList || WISH_LIST).find(w => w.id === id);
     return acc + (item ? item.annualCost : 0);
   }, 0);
 
@@ -1408,6 +1500,34 @@ function Scenarios() {
           </button>
         ))}
       </div>
+
+      {/* Approved for Projection */}
+      {approvedIds && approvedIds.size > 0 && (
+        <Card style={{ background: "#0a2440", border: `1px solid ${C.accent}55` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <span style={{ color: "#4ade80", fontWeight: 700, fontSize: 14 }}>Approved for Projection</span>
+            <span style={{ background: "#16a34a33", color: "#4ade80", borderRadius: 10, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
+              {approvedIds.size} item{approvedIds.size !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {(wishList || WISH_LIST).filter(w => approvedIds.has(w.id)).map(item => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6,
+                background: "#16a34a22", border: "1px solid #16a34a55", borderRadius: 8, padding: "6px 12px" }}>
+                <span style={{ color: C.text, fontSize: 12 }}>{item.name}</span>
+                <span style={{ color: "#4ade80", fontSize: 11, fontWeight: 600 }}>{fmt(item.annualCost)}/yr</span>
+                <button onClick={() => setApprovedIds(prev => { const n = new Set(prev); n.delete(item.id); return n; })}
+                  style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 12, padding: 0 }}>✕</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 10, color: C.textDim, fontSize: 12 }}>
+            Total approved: <strong style={{ color: "#4ade80" }}>
+              {fmt((wishList || WISH_LIST).filter(w => approvedIds.has(w.id)).reduce((s,w) => s + w.annualCost, 0), true)}/yr
+            </strong>
+          </div>
+        </Card>
+      )}
 
       {/* 3-Year P&L Impact Table */}
       <Card>
@@ -1468,11 +1588,36 @@ function Scenarios() {
       {/* Wish List Table */}
       <Card style={{ padding: 0 }}>
         <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.cardBorder}` }}>
-          <h3 style={{ color: C.actual, margin: 0, fontSize: 15 }}>Wish List Items</h3>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3 style={{ color: C.actual, margin: 0, fontSize: 15 }}>Wish List Items</h3>
+            <button onClick={() => { setShowAddForm(true); setEditingItem(null); }}
+              style={{ padding: "6px 14px", borderRadius: 8, background: C.accent, border: "none",
+                color: "white", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+              + Add Item
+            </button>
+          </div>
           <div style={{ color: C.textDim, fontSize: 11, marginTop: 4 }}>
-            {checked.size} of {WISH_LIST.length} items active — Total: {fmt(wishAdd, true)} annual
+            {checked.size} of {(wishList || WISH_LIST).length} items active — Total: {fmt(wishAdd, true)} annual
           </div>
         </div>
+        {(showAddForm || editingItem) && (
+          <div style={{ padding: "16px 20px" }}>
+            <WishListForm
+              item={editingItem}
+              onSave={(formData) => {
+                if (editingItem) {
+                  setWishList && setWishList(prev => prev.map(w => w.id === editingItem.id ? { ...w, ...formData } : w));
+                  setEditingItem(null);
+                } else {
+                  const newId = Math.max(...(wishList || WISH_LIST).map(w => w.id), 0) + 1;
+                  setWishList && setWishList(prev => [...prev, { ...formData, id: newId }]);
+                  setShowAddForm(false);
+                }
+              }}
+              onCancel={() => { setEditingItem(null); setShowAddForm(false); }}
+            />
+          </div>
+        )}
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
@@ -1485,10 +1630,11 @@ function Scenarios() {
                 <th style={{ padding: "10px 12px", textAlign: "center", color: C.textDim }}>Start</th>
                 <th style={{ padding: "10px 12px", textAlign: "right", color: C.textDim }}>Annual Cost</th>
                 <th style={{ padding: "10px 12px", textAlign: "center", color: C.textDim }}>Status</th>
+                <th style={{ padding: "10px 12px", textAlign: "center", color: C.textDim }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {WISH_LIST.map(item => {
+              {(wishList || WISH_LIST).map(item => {
                 const isActive = checked.has(item.id);
                 const isUnplanned = item.status === "unplanned_ask";
                 return (
@@ -1521,6 +1667,37 @@ function Scenarios() {
                       }}>
                         {isUnplanned ? "Unplanned Ask" : "Plan"}
                       </span>
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                        <button
+                          onClick={() => {
+                            if (approvedIds && setApprovedIds) {
+                              setApprovedIds(prev => {
+                                const next = new Set(prev);
+                                if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                                return next;
+                              });
+                            }
+                          }}
+                          style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                            border: "none", background: approvedIds?.has(item.id) ? "#16a34a" : "#1e3a6e",
+                            color: approvedIds?.has(item.id) ? "white" : C.textDim }}>
+                          {approvedIds?.has(item.id) ? "✓ Approved" : "Approve"}
+                        </button>
+                        <button
+                          onClick={() => { setEditingItem(item); setShowAddForm(false); }}
+                          style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, cursor: "pointer",
+                            border: `1px solid ${C.cardBorder}`, background: "transparent", color: C.textDim }}>
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => setWishList && setWishList(prev => prev.filter(w => w.id !== item.id))}
+                          style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, cursor: "pointer",
+                            border: "none", background: "rgba(239,68,68,0.15)", color: "#f87171" }}>
+                          ✕
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1657,6 +1834,9 @@ function App() {
   const C = darkMode ? DARK_THEME : LIGHT_THEME;
   const [txFilter, setTxFilter] = useState({ account: null, month: null });
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [wishListItems, setWishListItems] = useState(WISH_LIST);
+  const [approvedItemIds, setApprovedItemIds] = useState(new Set());
+  const approvedItems = wishListItems.filter(w => approvedItemIds.has(w.id));
 
   const handleNav = useCallback((p) => setPage(p), []);
   const handleSelectTx = useCallback((account, month) => {
@@ -1763,13 +1943,13 @@ function App() {
 
         {/* Page content */}
         {page === "dashboard" && <Dashboard onNav={handleNav} />}
-        {page === "fullpl" && <FullPL onNav={handleNav} onSelectTx={handleSelectTx} />}
+        {page === "fullpl" && <FullPL onNav={handleNav} onSelectTx={handleSelectTx} approvedItems={approvedItems} />}
         {page === "projections" && <Projections />}
         {page === "avb-summary" && <AvBSummary />}
         {page === "avb-detail" && <AvBDetail />}
         {page === "transactions" && <Transactions filterAccount={txFilter.account} filterMonth={txFilter.month} />}
-        {page === "scenarios" && <Scenarios />}
-        {page === "adj-ebitda" && <AdjEbitda />}
+        {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} />}
+        {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} />}
       </main>
       {/* Floating AI Chat Widget */}
       <FCAAssistant />
