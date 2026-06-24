@@ -1741,7 +1741,6 @@ const WISH_LIST = [
 ];
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
-export default 
 const ADJ_EBITDA_ADDBACKS = {
   rows: [
     { label: "MCSCM Expenses",         v26: [1167,1167,1167,1167,1167,1167,1235,1235,1235,1235,1235,1235] },
@@ -1827,7 +1826,7 @@ function AdjEbitda() {
   );
 }
 
-function App() {
+export default function App() {
   const [page, setPage] = useState("dashboard");
   const [fontSize, setFontSize] = useState("md");
   const [darkMode, setDarkMode] = useState(true);
