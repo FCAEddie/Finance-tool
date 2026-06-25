@@ -12,7 +12,7 @@ import {
   ChevronDown, ChevronRight, Upload, Plus, Pencil, Trash2,
   X, CheckCircle, AlertCircle, Info, ArrowUpRight, ArrowDownRight,
   FileText, Settings, Download, Sliders, MessageCircle, Send,
-  Sun, Moon
+  Sun, Moon, Bell
 } from "lucide-react";
 
 const ThemeCtx = React.createContext(null);
@@ -168,29 +168,59 @@ const getMonthlyChart = (year) => {
 
 // ─── Color themes ────────────────────────────────────────────────────────────
 const DARK_THEME = {
-  bg: "#1a3050", card: "#1e3a62", cardBorder: "#2a5298",
-  accent: "#3b82f6", accentLight: "#60a5fa",
-  actual: "#ffffff", projection: "#93c5fd",
-  projBg: "rgba(59,130,246,0.10)",
+  bg: "#0f1e2e", card: "#162033", cardBorder: "#1e3a62",
+  accent: "#1B96FF", accentLight: "#60a5fa", accentSoft: "rgba(27,150,255,0.15)",
+  actual: "#e2e8f0", projection: "#93c5fd",
+  projBg: "rgba(27,150,255,0.10)",
   totalBg: "rgba(42,82,152,0.45)", headerBg: "rgba(42,82,152,0.25)",
-  positive: "#22c55e", negative: "#ef4444",
+  positive: "#22c55e", positiveSoft: "rgba(34,197,94,0.15)",
+  negative: "#ef4444", negativeSoft: "rgba(239,68,68,0.15)",
   muted: "#64748b", text: "#e2e8f0", textDim: "#94a3b8",
+  shadow: "0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.25)",
+  sidebarBg: "#0a1628",
+  sidebarFg: "rgba(255,255,255,0.60)",
+  sidebarActiveBg: "rgba(27,150,255,0.20)",
+  sidebarActiveFg: "#FFFFFF",
+  sidebarHover: "rgba(255,255,255,0.06)",
+  sidebarBorder: "rgba(255,255,255,0.08)",
+  chartActual: "#1B96FF",
+  chartProj: "#7FB8E8",
 };
 const LIGHT_THEME = {
-  bg: "#f8fafc", card: "#ffffff", cardBorder: "#cbd5e1",
-  accent: "#2563eb", accentLight: "#3b82f6",
-  actual: "#0f172a", projection: "#1d4ed8",
-  projBg: "rgba(37,99,235,0.06)",
-  totalBg: "rgba(219,234,254,0.8)", headerBg: "rgba(219,234,254,0.5)",
-  positive: "#16a34a", negative: "#dc2626",
-  muted: "#64748b", text: "#1e293b", textDim: "#475569",
+  bg: "#F3F6FB",
+  card: "#FFFFFF",
+  cardBorder: "#E3EAF3",
+  accent: "#0B5CAB",
+  accentLight: "#1B96FF",
+  accentSoft: "#EAF3FD",
+  actual: "#16325C",
+  projection: "#0B5CAB",
+  projBg: "rgba(11,92,171,0.07)",
+  totalBg: "rgba(11,92,171,0.06)",
+  headerBg: "rgba(11,92,171,0.04)",
+  positive: "#2E844A",
+  positiveSoft: "#E3F1E8",
+  negative: "#BA0517",
+  negativeSoft: "#FBEAE9",
+  muted: "#5E6C84",
+  text: "#16325C",
+  textDim: "#5E6C84",
+  shadow: "0 1px 2px rgba(3,45,96,0.06), 0 6px 18px rgba(3,45,96,0.07)",
+  sidebarBg: "#032D60",
+  sidebarFg: "rgba(255,255,255,0.70)",
+  sidebarActiveBg: "rgba(27,150,255,0.18)",
+  sidebarActiveFg: "#FFFFFF",
+  sidebarHover: "rgba(255,255,255,0.08)",
+  sidebarBorder: "rgba(255,255,255,0.08)",
+  chartActual: "#0B5CAB",
+  chartProj: "#9DC7EE",
 };
 
 // ─── Shared UI Components ─────────────────────────────────────────────────────
 const Card = ({ children, className = "", style = {} }) => {
   const C = useC();
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: 20, ...style }} className={className}>
+    <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: 20, boxShadow: C.shadow, ...style }} className={className}>
       {children}
     </div>
   );
@@ -200,12 +230,15 @@ const KPICard = ({ label, value, sub, change, compact = true }) => {
   const C = useC();
   const isPos = change >= 0;
   return (
-    <Card style={{ padding: 16, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ color: C.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{label}</div>
-      <div style={{ color: C.actual, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>{fmt(value, compact)}</div>
-      {sub && <div style={{ color: C.textDim, fontSize: 11 }}>{sub}</div>}
+    <Card style={{ padding: "20px 20px 18px", textAlign: "left", display: "flex", flexDirection: "column" }}>
+      <div style={{ color: C.textDim, fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>{label}</div>
+      <div style={{ color: C.actual, fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.1, marginBottom: 8 }}>{fmt(value, compact)}</div>
+      {sub && <div style={{ color: C.textDim, fontSize: 11, marginBottom: 4 }}>{sub}</div>}
       {change != null && (
-        <div style={{ color: isPos ? C.positive : C.negative, fontSize: 12, marginTop: 4, display: "flex", alignItems: "center", gap: 4, justifyContent: "center" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: "auto",
+          background: isPos ? C.positiveSoft : C.negativeSoft,
+          color: isPos ? C.positive : C.negative,
+          borderRadius: 999, padding: "4px 10px", fontSize: 11.5, fontWeight: 600, alignSelf: "flex-start" }}>
           {isPos ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
           {Math.abs(change * 100).toFixed(1)}% YoY
         </div>
@@ -2654,82 +2687,143 @@ export default function App() {
     <ThemeCtx.Provider value={C}>
     <>
     <style>{`
+      * { box-sizing: border-box; }
+      body { margin: 0; }
       [data-fs="sm"] * { font-size: 13px !important; }
-      [data-fs="md"] * { font-size: 15px !important; }
-      [data-fs="lg"] * { font-size: 17px !important; }
-      [data-fs="sm"] h1, [data-fs="sm"] h2, [data-fs="sm"] h3 { font-size: 16px !important; }
-      [data-fs="md"] h1, [data-fs="md"] h2, [data-fs="md"] h3 { font-size: 19px !important; }
-      [data-fs="lg"] h1, [data-fs="lg"] h2, [data-fs="lg"] h3 { font-size: 22px !important; }
+      [data-fs="md"] * { font-size: 14px !important; }
+      [data-fs="lg"] * { font-size: 16px !important; }
+      [data-fs="sm"] h1, [data-fs="sm"] h2, [data-fs="sm"] h3 { font-size: 15px !important; }
+      [data-fs="md"] h1, [data-fs="md"] h2, [data-fs="md"] h3 { font-size: 18px !important; }
+      [data-fs="lg"] h1, [data-fs="lg"] h2, [data-fs="lg"] h3 { font-size: 21px !important; }
+      button { font-family: inherit; }
+      ::-webkit-scrollbar { width: 5px; height: 5px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 99px; }
     `}</style>
-    <div data-fs={fontSize} style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: "'Inter', 'Segoe UI', sans-serif", color: C.text }}>
+    <div data-fs={fontSize} style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: "'Poppins', 'Inter', 'Segoe UI', sans-serif", color: C.text }}>
       {/* Sidebar */}
-      <aside style={{ width: sidebarOpen ? 220 : 56, background: C.card, borderRight: `1px solid ${C.cardBorder}`,
-        flexShrink: 0, display: "flex", flexDirection: "column", transition: "width 0.2s" }}>
-
-        {/* Logo + toggle */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 12px", borderBottom: `1px solid ${C.cardBorder}` }}>
-          <FCALogo size={32} />
-          {sidebarOpen && <span style={{ color: C.actual, fontWeight: 700, fontSize: 14, letterSpacing: 0.3 }}>FCA FP&amp;A</span>}
-          <button onClick={() => setSidebarOpen(o => !o)} style={{ marginLeft: "auto", background: "none", border: "none", color: C.textDim, cursor: "pointer", padding: 4 }}>
-            {sidebarOpen ? <ChevronDown size={16} style={{ transform: "rotate(90deg)" }} /> : <ChevronRight size={16} />}
+      <aside style={{
+        width: sidebarOpen ? 248 : 64, background: C.sidebarBg,
+        borderRight: `1px solid ${C.sidebarBorder}`,
+        flexShrink: 0, display: "flex", flexDirection: "column", transition: "width 0.22s ease",
+        overflow: "hidden"
+      }}>
+        {/* Logo */}
+        <div style={{ padding: sidebarOpen ? "22px 18px 20px" : "20px 12px", display: "flex", alignItems: "center", gap: 10, minHeight: 80 }}>
+          <img
+            src="/Finance-tool/assets/fca-logo-white.png"
+            alt="FCA"
+            style={{ height: 36, width: "auto", flexShrink: 0, display: "block" }}
+            onError={e => { e.target.style.display='none'; }}
+          />
+          {sidebarOpen && (
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "#FFFFFF", fontWeight: 700, fontSize: 13, letterSpacing: 0.2, lineHeight: 1.2 }}>Field Control</div>
+              <div style={{ color: C.sidebarFg, fontSize: 10, fontWeight: 500, letterSpacing: "0.07em", textTransform: "uppercase", marginTop: 2 }}>Financial Planning &amp; Analysis</div>
+            </div>
+          )}
+          <button onClick={() => setSidebarOpen(o => !o)}
+            style={{ marginLeft: "auto", background: "none", border: "none", color: C.sidebarFg, cursor: "pointer", padding: 4, flexShrink: 0, display: "flex", alignItems: "center" }}>
+            {sidebarOpen ? <ChevronDown size={15} style={{ transform: "rotate(90deg)" }} /> : <ChevronRight size={15} />}
           </button>
         </div>
 
-        {/* Nav items */}
-        <nav style={{ flex: 1, padding: "8px 6px", overflowY: "auto" }}>
-          {navItems.map(({ id, label, icon: Icon, sub }) => (
-            <button key={id} onClick={() => handleNav(id)}
-              style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 8,
-                background: page === id ? `${C.accent}33` : "transparent",
-                border: `1px solid ${page === id ? C.accent + "55" : "transparent"}`,
-                color: page === id ? C.actual : C.textDim, cursor: "pointer", marginBottom: 2,
-                textAlign: "left", transition: "background 0.15s" }}>
-              <Icon size={17} style={{ flexShrink: 0, color: page === id ? C.accent : C.textDim }} />
-              {sidebarOpen && (
-                <div style={{ overflow: "hidden" }}>
-                  <div style={{ fontSize: 12, fontWeight: page === id ? 600 : 400 }}>{label}</div>
-                  {sub && <div style={{ fontSize: 10, color: C.textDim, marginTop: 1 }}>{sub}</div>}
-                </div>
-              )}
-            </button>
-          ))}
+        {/* Nav */}
+        <nav style={{ flex: 1, padding: "4px 10px", overflowY: "auto", overflowX: "hidden" }}>
+          {navItems.map(({ id, label, icon: Icon, sub }) => {
+            const active = page === id;
+            return (
+              <button key={id} onClick={() => handleNav(id)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  padding: sidebarOpen ? "9px 12px" : "10px 0",
+                  justifyContent: sidebarOpen ? "flex-start" : "center",
+                  borderRadius: 8,
+                  background: active ? C.sidebarActiveBg : "transparent",
+                  border: "none",
+                  color: active ? C.sidebarActiveFg : C.sidebarFg,
+                  cursor: "pointer", marginBottom: 2, textAlign: "left",
+                  transition: "background 0.15s, color 0.15s",
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.sidebarHover; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+              >
+                <Icon size={18} style={{ flexShrink: 0, color: active ? "#FFFFFF" : C.sidebarFg }} />
+                {sidebarOpen && (
+                  <div style={{ overflow: "hidden", minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: active ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+                    {sub && <div style={{ fontSize: 10, color: C.sidebarFg, marginTop: 1 }}>{sub}</div>}
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Bottom controls */}
-        <div style={{ padding: "10px 8px", borderTop: `1px solid ${C.cardBorder}`, display: "flex", flexDirection: "column", gap: 6 }}>
-          {/* Font size */}
+        {/* Bottom */}
+        <div style={{ padding: "12px 10px", borderTop: `1px solid ${C.sidebarBorder}` }}>
           {sidebarOpen && (
-            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 4, justifyContent: "center", marginBottom: 8 }}>
               {["sm","md","lg"].map(s => (
                 <button key={s} onClick={() => setFontSize(s)}
-                  style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${fontSize===s?C.accent:C.cardBorder}`,
-                    background: fontSize===s?C.accent:"transparent", color: C.actual, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                  style={{ padding: "3px 9px", borderRadius: 6,
+                    border: `1px solid ${fontSize===s ? C.accentLight : "rgba(255,255,255,0.18)"}`,
+                    background: fontSize===s ? C.accentLight : "transparent",
+                    color: fontSize===s ? "#fff" : C.sidebarFg,
+                    cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
                   {s.toUpperCase()}
                 </button>
               ))}
             </div>
           )}
-          {/* Dark/Light toggle */}
           <button onClick={() => setDarkMode(d => !d)}
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 8,
-              border: `1px solid ${C.cardBorder}`, background: "transparent", color: C.textDim, cursor: "pointer" }}>
+            style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: sidebarOpen ? "flex-start" : "center",
+              gap: 8, padding: "8px 10px", borderRadius: 8,
+              border: "none", background: "rgba(255,255,255,0.06)",
+              color: C.sidebarFg, cursor: "pointer" }}>
             {darkMode ? <Sun size={15} /> : <Moon size={15} />}
             {sidebarOpen && <span style={{ fontSize: 12 }}>{darkMode ? "Light Mode" : "Dark Mode"}</span>}
           </button>
+          {/* User avatar */}
+          {sidebarOpen && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 10px 2px", marginTop: 6, borderTop: `1px solid ${C.sidebarBorder}` }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(27,150,255,0.25)", color: "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>EM</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: "#FFFFFF", fontSize: 13, fontWeight: 600, lineHeight: 1.2 }}>Eddie Martin</div>
+                <div style={{ color: C.sidebarFg, fontSize: 11, marginTop: 1 }}>Finance · Admin</div>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* Main content */}
-      <main style={{ flex: 1, padding: "24px 28px", overflowY: "auto", minWidth: 0 }}>
+      <main style={{ flex: 1, padding: "24px 32px 36px", overflowY: "auto", minWidth: 0, background: C.bg }}>
         {/* Top bar */}
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 20, gap: 12 }}>
-          <div>
-            <div style={{ color: C.actual, fontWeight: 700, fontSize: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 24, gap: 16, paddingBottom: 20, borderBottom: `1px solid ${C.cardBorder}` }}>
+          <div style={{ flex: 1 }}>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: C.actual, letterSpacing: "-0.02em", lineHeight: 1.2 }}>
               {navItems.find(n => n.id === page)?.label || ""}
               {navItems.find(n => n.id === page)?.sub ? ` — ${navItems.find(n => n.id === page).sub}` : ""}
-            </div>
-            <div style={{ color: C.textDim, fontSize: 11 }}>FY 2026–2028</div>
+            </h1>
+            <div style={{ color: C.textDim, fontSize: 12, marginTop: 3 }}>Field Control Analytics · FY 2026–2028</div>
           </div>
+          {/* Year tabs */}
+          <div style={{ display: "flex", background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 999, padding: 3, gap: 0 }}>
+            {YEARS.map(yr => (
+              <button key={yr} style={{
+                padding: "6px 16px", borderRadius: 999, border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 600,
+                background: yr === 2026 ? C.accent : "transparent",
+                color: yr === 2026 ? "#fff" : C.textDim,
+                transition: "all 0.15s"
+              }}>{`FY ${yr}`}</button>
+            ))}
+          </div>
+          {/* Bell */}
+          <button style={{ width: 38, height: 38, borderRadius: "50%", border: `1px solid ${C.cardBorder}`, background: C.card, color: C.textDim, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+            <Bell size={17} />
+          </button>
         </div>
 
         {/* Page content */}
@@ -2739,4 +2833,11 @@ export default function App() {
         {page === "projections" && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-summary" && <AvBSummary projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-detail" && <AvBDetail projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
-        {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprov
+        {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} rolledItems={rolledItems} setRolledItems={setRolledItems} />}
+        {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} rolledItems={rolledItems} />}
+      </main>
+    </div>
+    </>
+    </ThemeCtx.Provider>
+  );
+}
