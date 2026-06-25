@@ -39,11 +39,8 @@ const ACTUALS_THRU = 4; // Jan–May (index 0–4) are actual; index 5+ are proj
 const YEARS = [2026, 2027, 2028];
 
 // ─── Utility Helpers ──────────────────────────────────────────────────────────
-const fmt = (n, compact = false) => {
+const fmt = (n) => {
   if (n == null || isNaN(n)) return "—";
-  const abs = Math.abs(n);
-  if (compact && abs >= 1_000_000) return `${n < 0 ? "-" : ""}$${(abs/1_000_000).toFixed(1)}M`;
-  if (compact && abs >= 1_000) return `${n < 0 ? "-" : ""}$${(abs/1_000).toFixed(0)}K`;
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 };
 const pct = (n) => n == null ? "—" : `${(n * 100).toFixed(1)}%`;
@@ -169,7 +166,7 @@ const getMonthlyChart = (year) => {
 // ─── Color themes ────────────────────────────────────────────────────────────
 const DARK_THEME = {
   bg: "#0f1e2e", card: "#162033", cardBorder: "#1e3a62",
-  accent: "#1B96FF", accentLight: "#60a5fa", accentSoft: "rgba(27,150,255,0.15)",
+  accent: "#1B96FF", accentLight: C.accentLight, accentSoft: "rgba(27,150,255,0.15)",
   actual: "#e2e8f0", projection: "#93c5fd",
   projBg: "rgba(27,150,255,0.10)",
   totalBg: "rgba(42,82,152,0.45)", headerBg: "rgba(42,82,152,0.25)",
@@ -226,7 +223,7 @@ const Card = ({ children, className = "", style = {} }) => {
   );
 };
 
-const KPICard = ({ label, value, sub, change, compact = true }) => {
+const KPICard = ({ label, value, sub, change }) => {
   const C = useC();
   const isPos = change >= 0;
   return (
@@ -353,7 +350,7 @@ function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
     const pos = v >= 0;
     return (
       <span style={{ color: pos ? C.positive : C.negative, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 2 }}>
-        {pos ? "▲" : "▼"} {fmt(Math.abs(v), true)}{pct !== null ? ` (${Math.abs(pct).toFixed(1)}%)` : ""}
+        {pos ? "▲" : "▼"} {fmt(Math.abs(v))}{pct !== null ? ` (${Math.abs(pct).toFixed(1)}%)` : ""}
       </span>
     );
   };
@@ -400,7 +397,7 @@ function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
               </div>
             ) : (
               <div style={{ color: i === 2 ? (k.value >= 0 ? C.positive : C.negative) : C.actual, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-                {k.value !== null ? fmt(k.value, true) : "—"}
+                {k.value !== null ? fmt(k.value) : "—"}
               </div>
             )}
             <div style={{ color: C.textDim, fontSize: 11 }}>{k.sub}</div>
@@ -430,7 +427,7 @@ function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
           <ComposedChart data={view === "ytd" ? chartData.slice(0, ACTUALS_THRU + 1) : chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} opacity={0.5} />
             <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
-            <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
+            <YAxis tickFormatter={v => fmt(v)} tick={{ fill: C.textDim, fontSize: 11 }} />
             <Tooltip
               contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, color: C.actual }}
               formatter={(value, name) => value !== null ? [fmt(value), name] : []}
@@ -699,7 +696,7 @@ function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
             <ComposedChart data={revChartData} margin={{ top:4, right:4, left:-10, bottom:0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} vertical={false} />
               <XAxis dataKey="month" tick={{ fontSize:10.5, fill:C.textDim }} axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={v=>`$${(v/1e6).toFixed(1)}M`} tick={{ fontSize:10.5, fill:C.textDim }} axisLine={false} tickLine={false} domain={[0,chartMax]} />
+              <YAxis tickFormatter={v=>fmt(v)} tick={{ fontSize:10.5, fill:C.textDim }} axisLine={false} tickLine={false} domain={[0,chartMax]} />
               <Tooltip formatter={(v,n)=>[fmt(v), n==="actual"?"Actual":n==="plan"?"Plan":"Projected"]}
                 contentStyle={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:8, fontSize:12 }} />
               <Bar dataKey="plan"      fill={C.chartProj} opacity={0.4} radius={[3,3,0,0]} name="Plan" />
@@ -902,8 +899,8 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1200 }}>
             <thead>
-              <tr style={{ background: "#0d1f3c", position: "sticky", top: 0, zIndex: 10 }}>
-                <th style={{ textAlign: "left", padding: "10px 12px", color: C.textDim, fontWeight: 500, width: 280, position: "sticky", left: 0, background: "#0d1f3c", zIndex: 11 }}>Account</th>
+              <tr style={{ background: C.bg, position: "sticky", top: 0, zIndex: 10, borderBottom: `1px solid ${C.cardBorder}` }}>
+                <th style={{ textAlign: "left", padding: "10px 12px", color: C.textDim, fontWeight: 500, width: 280, position: "sticky", left: 0, background: C.bg, zIndex: 11 }}>Account</th>
                 {MONTHS.map((m, i) => (
                   <th key={m} style={{ textAlign: "right", padding: "10px 8px", fontWeight: 500, minWidth: 80,
                     color: isActualMonth(year, i) ? C.actual : C.projection,
@@ -962,7 +959,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
                             cursor: (!isAct && isLeaf) ? "text" : (effVal ? "pointer" : "default"),
                             borderLeft: mi === 5 && year === 2026 ? `2px dashed ${C.cardBorder}` : "none",
                             fontWeight: isTot ? 700 : 400 }}
-                          onMouseEnter={e => !isEditing && (e.currentTarget.style.background = "#1e3a6e55")}
+                          onMouseEnter={e => !isEditing && (e.currentTarget.style.background = C.headerBg)}
                           onMouseLeave={e => e.currentTarget.style.background = hasOverride ? "rgba(245,158,11,0.08)" : !isAct ? C.projBg : "transparent"}>
                           {isEditing ? (
                             <input
@@ -985,7 +982,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
                             <span
                               onDoubleClick={e => { e.stopPropagation(); if (!isAct && isLeaf) setEditingCell({ rowA: row.a, year, monthIdx: mi }); }}
                               title={!isAct && isLeaf ? "Double-click to edit" : undefined}>
-                              {effVal ? fmt(effVal, true) : "—"}
+                              {effVal ? fmt(effVal) : "—"}
                             </span>
                           )}
                         </td>
@@ -996,7 +993,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
                       {(() => {
                         const rowIdx2 = row._idx ?? UNIFIED_PL.findIndex(r => r.a === row.a);
                         const total = MONTHS.reduce((s, _, mi) => s + computeEffective(rowIdx2, year, mi, projOverrides, approvedItems, rolledItems), 0);
-                        return total ? fmt(total, true) : "—";
+                        return total ? fmt(total) : "—";
                       })()}
                     </td>
                   </tr>
@@ -1018,7 +1015,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => { applyRollForward("month"); setRollForwardPrompt(null); }}
-              style={{ padding: "5px 10px", borderRadius: 6, background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", color: "#60a5fa", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
+              style={{ padding: "5px 10px", borderRadius: 6, background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", color: C.accentLight, fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
               This month only
             </button>
             <button onClick={() => { applyRollForward("year"); setRollForwardPrompt(null); }}
@@ -1065,7 +1062,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
             {/* Approved Scenario Items */}
             {am && am.length > 0 && (
               <div style={{ background: "rgba(34,197,94,0.08)", borderRadius: 8, padding: "10px 14px", border: "1px solid rgba(34,197,94,0.25)" }}>
-                <div style={{ color: "#4ade80", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>APPROVED SCENARIO ITEMS</div>
+                <div style={{ color: C.positive, fontSize: 11, fontWeight: 600, marginBottom: 8 }}>APPROVED SCENARIO ITEMS</div>
                 <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${C.cardBorder}33` }}>
@@ -1078,7 +1075,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
                     {am.map(item => (
                       <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
                         <td style={{ padding: "4px 6px", color: C.text }}>{item.name}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right", color: "#4ade80", fontWeight: 600 }}>+{fmt(Math.round((item.annualCost||0)/12))}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", color: C.positive, fontWeight: 600 }}>+{fmt(Math.round((item.annualCost||0)/12))}</td>
                         <td style={{ padding: "4px 6px", color: C.textDim, fontSize: 11 }}>{item.startMonth} {item.startYear} – {item.endMonth} {item.endYear}</td>
                       </tr>
                     ))}
@@ -1089,7 +1086,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
             {/* Rolled Items */}
             {rm && rm.length > 0 && (
               <div style={{ background: "rgba(59,130,246,0.08)", borderRadius: 8, padding: "10px 14px", border: "1px solid rgba(59,130,246,0.25)" }}>
-                <div style={{ color: "#60a5fa", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>ROLLED INTO PROJECTIONS</div>
+                <div style={{ color: C.accentLight, fontSize: 11, fontWeight: 600, marginBottom: 8 }}>ROLLED INTO PROJECTIONS</div>
                 <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${C.cardBorder}33` }}>
@@ -1103,8 +1100,8 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
                     {rm.map(item => (
                       <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
                         <td style={{ padding: "4px 6px", color: C.text }}>{item.name}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right", color: "#60a5fa", fontWeight: 600 }}>+{fmt(Math.round((item.annualCost||0)/12))}</td>
-                        <td style={{ padding: "4px 6px", color: "#4ade80", fontSize: 11 }}>{item.rolledDate}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", color: C.accentLight, fontWeight: 600 }}>+{fmt(Math.round((item.annualCost||0)/12))}</td>
+                        <td style={{ padding: "4px 6px", color: C.positive, fontSize: 11 }}>{item.rolledDate}</td>
                         <td style={{ padding: "4px 6px", color: C.textDim, fontSize: 11 }}>{item.requester}</td>
                       </tr>
                     ))}
@@ -1243,7 +1240,7 @@ function Projections({ projOverrides, setProjOverrides, approvedItems, rolledIte
           ))}
           <button onClick={() => setAddModal(true)}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8,
-              border: `1px solid ${C.positive}`, background: "#16a34a22", color: C.positive, cursor: "pointer", fontSize: 12 }}>
+              border: `1px solid ${C.positive}`, background: C.positiveSoft, color: C.positive, cursor: "pointer", fontSize: 12 }}>
             <Plus size={13} /> Add Line
           </button>
         </div>
@@ -1257,7 +1254,7 @@ function Projections({ projOverrides, setProjOverrides, approvedItems, rolledIte
       </div>
 
       {saveFeedback && (
-        <div style={{ background: "#16a34a22", border: "1px solid #16a34a55", borderRadius: 8, padding: "10px 16px", color: "#4ade80", fontSize: 13 }}>
+        <div style={{ background: C.positiveSoft, border: "1px solid #16a34a55", borderRadius: 8, padding: "10px 16px", color: C.positive, fontSize: 13 }}>
           <CheckCircle size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />{saveFeedback}
         </div>
       )}
@@ -1267,7 +1264,7 @@ function Projections({ projOverrides, setProjOverrides, approvedItems, rolledIte
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1100 }}>
             <thead>
-              <tr style={{ background: "#0d1f3c" }}>
+              <tr style={{ background: C.bg, borderBottom: `1px solid ${C.cardBorder}` }}>
                 <th style={{ textAlign: "left", padding: "10px 12px", color: C.textDim, width: 260 }}>Account</th>
                 {MONTHS.map(m => (
                   <th key={m} style={{ textAlign: "right", padding: "10px 8px", color: C.projection, minWidth: 80 }}>{m}</th>
@@ -1311,7 +1308,7 @@ function Projections({ projOverrides, setProjOverrides, approvedItems, rolledIte
                               style={{ width: 72, background: C.bg, border: `1px solid ${C.accent}`, borderRadius: 4,
                                 color: C.actual, padding: "2px 4px", fontSize: 11, textAlign: "right" }} />
                           ) : (
-                            <span>{effVal ? fmt(effVal, true) : "—"}</span>
+                            <span>{effVal ? fmt(effVal) : "—"}</span>
                           )}
                         </td>
                       );
@@ -1321,13 +1318,13 @@ function Projections({ projOverrides, setProjOverrides, approvedItems, rolledIte
                         const t = rowIdx >= 0
                           ? MONTHS.reduce((s,_,mi) => s + computeEffective(rowIdx, year, mi, projOverrides, approvedItems, rolledItems), 0)
                           : sum(getRowData(row, year) || []);
-                        return t ? fmt(t, true) : "—";
+                        return t ? fmt(t) : "—";
                       })()}
                     </td>
                     <td style={{ textAlign: "center", padding: "6px 8px" }}>
                       {isEditingThis ? (
                         <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                          <button onClick={() => saveEdit(row)} style={{ background: "#16a34a22", border: "1px solid #16a34a55", borderRadius: 4, color: C.positive, cursor: "pointer", padding: "2px 6px", fontSize: 10 }}>Save</button>
+                          <button onClick={() => saveEdit(row)} style={{ background: C.positiveSoft, border: "1px solid #16a34a55", borderRadius: 4, color: C.positive, cursor: "pointer", padding: "2px 6px", fontSize: 10 }}>Save</button>
                           <button onClick={() => { setEditRow(null); setEditVals(null); }} style={{ background: "transparent", border: `1px solid ${C.cardBorder}`, borderRadius: 4, color: C.textDim, cursor: "pointer", padding: "2px 6px", fontSize: 10 }}>Cancel</button>
                         </div>
                       ) : (
@@ -1440,11 +1437,11 @@ function AvBSummary({ projOverrides, approvedItems, rolledItems }) {
           return (
             <Card key={label} style={{ padding: 16 }}>
               <div style={{ color: C.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{label}</div>
-              <div style={{ color: C.actual, fontSize: 20, fontWeight: 700 }}>{fmt(val, true)}</div>
-              <div style={{ color: C.textDim, fontSize: 11, marginTop: 2 }}>Budget: {fmt(bud, true)}</div>
+              <div style={{ color: C.actual, fontSize: 20, fontWeight: 700 }}>{fmt(val)}</div>
+              <div style={{ color: C.textDim, fontSize: 11, marginTop: 2 }}>Budget: {fmt(bud)}</div>
               <div style={{ color: favorable ? C.positive : C.negative, fontSize: 12, marginTop: 6, display: "flex", alignItems: "center", gap: 4 }}>
                 {favorable ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                {fmt(variance, true)} ({vPct >= 0 ? "+" : ""}{(vPct * 100).toFixed(1)}%)
+                {fmt(variance)} ({vPct >= 0 ? "+" : ""}{(vPct * 100).toFixed(1)}%)
               </div>
             </Card>
           );
@@ -1456,12 +1453,12 @@ function AvBSummary({ projOverrides, approvedItems, rolledItems }) {
         <h3 style={{ color: C.actual, margin: "0 0 16px", fontSize: 15 }}>Revenue – Actual vs Budget (2026)</h3>
         <ResponsiveContainer width="100%" height={260}>
           <ComposedChart data={summaryData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e3a6e" />
+            <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} />
             <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
-            <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
+            <YAxis tickFormatter={v => fmt(v)} tick={{ fill: C.textDim, fontSize: 11 }} />
             <Tooltip formatter={(v, n) => [v ? fmt(v) : "N/A", n]} contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8 }} labelStyle={{ color: C.actual }} />
             <Legend wrapperStyle={{ color: C.textDim, fontSize: 12 }} />
-            <Bar dataKey="Budget Revenue" fill="#1e3a6e" radius={[3,3,0,0]} />
+            <Bar dataKey="Budget Revenue" fill={C.textDim} radius={[3,3,0,0]} />
             <Bar dataKey="Actual Revenue" fill="#2563eb" radius={[3,3,0,0]} />
           </ComposedChart>
         </ResponsiveContainer>
@@ -1472,9 +1469,9 @@ function AvBSummary({ projOverrides, approvedItems, rolledItems }) {
         <h3 style={{ color: C.actual, margin: "0 0 16px", fontSize: 15 }}>Net Income – Actual vs Budget (2026)</h3>
         <ResponsiveContainer width="100%" height={260}>
           <ComposedChart data={summaryData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e3a6e" />
+            <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} />
             <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
-            <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
+            <YAxis tickFormatter={v => fmt(v)} tick={{ fill: C.textDim, fontSize: 11 }} />
             <Tooltip formatter={(v, n) => [v ? fmt(v) : "N/A", n]} contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8 }} labelStyle={{ color: C.actual }} />
             <Legend wrapperStyle={{ color: C.textDim, fontSize: 12 }} />
             <ReferenceLine y={0} stroke={C.muted} />
@@ -1549,11 +1546,11 @@ function AvBDetail({ projOverrides, approvedItems, rolledItems }) {
             <Card key={label} style={{ padding: 14 }}>
               <div style={{ color: C.textDim, fontSize: 11, marginBottom: 4 }}>{label}</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, textAlign: "center" }}>
-                <div><div style={{ color: C.textDim, fontSize: 10 }}>Actual</div><div style={{ color: C.actual, fontWeight: 700, fontSize: 15 }}>{fmt(actual, true)}</div></div>
-                <div><div style={{ color: C.textDim, fontSize: 10 }}>Budget</div><div style={{ color: C.textDim, fontSize: 15 }}>{fmt(budget, true)}</div></div>
+                <div><div style={{ color: C.textDim, fontSize: 10 }}>Actual</div><div style={{ color: C.actual, fontWeight: 700, fontSize: 15 }}>{fmt(actual)}</div></div>
+                <div><div style={{ color: C.textDim, fontSize: 10 }}>Budget</div><div style={{ color: C.textDim, fontSize: 15 }}>{fmt(budget)}</div></div>
                 <div><div style={{ color: C.textDim, fontSize: 10 }}>Variance</div>
                   <div style={{ color: favorable ? C.positive : C.negative, fontWeight: 700, fontSize: 15 }}>
-                    {variance >= 0 ? "+" : ""}{fmt(variance, true)}
+                    {variance >= 0 ? "+" : ""}{fmt(variance)}
                   </div>
                 </div>
               </div>
@@ -1566,7 +1563,7 @@ function AvBDetail({ projOverrides, approvedItems, rolledItems }) {
       <Card style={{ padding: 0 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
-            <tr style={{ background: "#0d1f3c" }}>
+            <tr style={{ background: C.bg, borderBottom: `1px solid ${C.cardBorder}` }}>
               <th style={{ textAlign: "left", padding: "10px 16px", color: C.textDim, width: "40%" }}>Account</th>
               <th style={{ textAlign: "right", padding: "10px 12px", color: C.actual }}>Actual</th>
               <th style={{ textAlign: "right", padding: "10px 12px", color: C.textDim }}>Budget</th>
@@ -1588,7 +1585,7 @@ function AvBDetail({ projOverrides, approvedItems, rolledItems }) {
                   style={{ borderBottom: `1px solid ${C.cardBorder}22`,
                     background: isTot ? C.totalBg : "transparent",
                     cursor: "pointer", fontWeight: isTot ? 700 : 400 }}
-                  onMouseEnter={e => e.currentTarget.style.background = "#1e3a6e44"}
+                  onMouseEnter={e => e.currentTarget.style.background = C.headerBg}
                   onMouseLeave={e => e.currentTarget.style.background = isTot ? C.totalBg : "transparent"}>
                   <td style={{ padding: "8px 16px", color: isHead ? C.textDim : C.text, paddingLeft: 16 + i * 16, fontSize: isHead ? 11 : 12 }}>{a}</td>
                   <td style={{ textAlign: "right", padding: "8px 12px", color: C.actual }}>{actual ? fmt(actual) : "—"}</td>
@@ -1642,11 +1639,11 @@ function AvBDetail({ projOverrides, approvedItems, rolledItems }) {
               <div style={{ color: C.textDim, fontSize: 12, marginBottom: 10 }}>Monthly trend for this account:</div>
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={MONTHS.map((m, i) => ({ month: m, value: varModal.v26?.[i] || 0, plan: varModal.plan26?.[i] || 0 }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e3a6e" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} />
                   <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 10 }} />
-                  <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 10 }} />
+                  <YAxis tickFormatter={v => fmt(v)} tick={{ fill: C.textDim, fontSize: 10 }} />
                   <Tooltip formatter={(v, n) => [fmt(v), n]} contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 6 }} />
-                  <Bar dataKey="plan" fill="#1e3a6e" radius={[2,2,0,0]} name="Budget" />
+                  <Bar dataKey="plan" fill={C.textDim} radius={[2,2,0,0]} name="Budget" />
                   <Bar dataKey="value" fill="#2563eb" radius={[2,2,0,0]} name="Actual" />
                 </BarChart>
               </ResponsiveContainer>
@@ -1727,7 +1724,7 @@ function Transactions({ filterAccount, filterMonth }) {
           </div>
         </div>
         <div style={{ marginTop: 8, fontSize: 12, color: C.textDim }}>
-          Showing {filtered.length.toLocaleString()} transactions — Total: <span style={{ color: totalAmount >= 0 ? C.positive : C.negative, fontWeight: 600 }}>{fmt(Math.abs(totalAmount), false)}</span>
+          Showing {filtered.length.toLocaleString()} transactions — Total: <span style={{ color: totalAmount >= 0 ? C.positive : C.negative, fontWeight: 600 }}>{fmt(Math.abs(totalAmount))}</span>
         </div>
       </Card>
 
@@ -1753,7 +1750,7 @@ function Transactions({ filterAccount, filterMonth }) {
                   <td style={{ padding: "8px 12px", color: C.text, fontSize: 12, maxWidth: 220 }}>{t.v || "—"}</td>
                   <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 12,
                     color: t.a >= 0 ? C.text : C.negative, fontWeight: 500 }}>
-                    {t.a >= 0 ? fmt(t.a, false) : `(${fmt(-t.a, false)})`}
+                    {t.a >= 0 ? fmt(t.a) : `(${fmt(-t.a)})`}
                   </td>
                 </tr>
               ))}
@@ -1800,14 +1797,14 @@ function FCAAssistant() {
     }
     if (lower.includes("revenue")) {
       const total = sum(k26.rev);
-      return `Full Year 2026 Revenue (plan): ${fmt(total, true)}. YTD (Jan–May actual): ${fmt(sum(k26.rev.slice(0, 5)), true)}.`;
+      return `Full Year 2026 Revenue (plan): ${fmt(total)}. YTD (Jan–May actual): ${fmt(sum(k26.rev.slice(0, 5)), true)}.`;
     }
     if (lower.includes("vs plan") || lower.includes("plan")) {
       const revRows = UNIFIED_PL.filter(r => r.type === "revenue");
       const planYTD = PLAN_2026.rev.slice(0, 5).reduce((a, b) => a + b, 0);
       const actYTD = sum(k26.rev.slice(0, 5));
       const diff = actYTD - planYTD;
-      return `YTD Revenue vs Plan: Actual ${fmt(actYTD, true)} vs Plan ${fmt(planYTD, true)} — ${diff >= 0 ? "+" : ""}${fmt(diff, true)} (${((diff/planYTD)*100).toFixed(1)}%).`;
+      return `YTD Revenue vs Plan: Actual ${fmt(actYTD)} vs Plan ${fmt(planYTD)} — ${diff >= 0 ? "+" : ""}${fmt(diff)} (${((diff/planYTD)*100).toFixed(1)}%).`;
     }
     if (lower.includes("expense") || lower.includes("cost")) {
       const totalExp = sum(k26.exp);
@@ -1815,22 +1812,22 @@ function FCAAssistant() {
       const biggest = UNIFIED_PL.filter(r => r.type === "expense" && !isTotal(r.a) && !isHeader(r.a))
         .map(r => ({ a: r.a, total: sum(r.v26) }))
         .sort((a, b) => b.total - a.total)[0];
-      return `2026 YTD Expenses: ${fmt(ytdExp, true)}. Largest expense line: ${biggest?.a} (${fmt(biggest?.total, true)} annual).`;
+      return `2026 YTD Expenses: ${fmt(ytdExp)}. Largest expense line: ${biggest?.a} (${fmt(biggest?.total)} annual).`;
     }
     if (lower.includes("net income") || lower.includes("profit") || lower.includes("bottom line")) {
       const ytd = sum(k26.ni.slice(0, 5));
       const full = sum(k26.ni);
-      return `YTD Net Income (Jan–May 2026): ${fmt(ytd, true)}. Full year plan: ${fmt(full, true)}.`;
+      return `YTD Net Income (Jan–May 2026): ${fmt(ytd)}. Full year plan: ${fmt(full)}.`;
     }
     if (lower.includes("ebitda")) {
       const ytd = sum(k26.ebitda.slice(0, 5));
       const full = sum(k26.ebitda);
-      return `YTD Adj. EBITDA (Jan–May 2026): ${fmt(ytd, true)}. Full year: ${fmt(full, true)}.`;
+      return `YTD Adj. EBITDA (Jan–May 2026): ${fmt(ytd)}. Full year: ${fmt(full)}.`;
     }
     if (lower.includes("gross profit") || lower.includes("gross margin")) {
       const ytd = sum(k26.gp.slice(0, 5));
       const ytdRev = sum(k26.rev.slice(0, 5));
-      return `YTD Gross Profit: ${fmt(ytd, true)} (${((ytd/ytdRev)*100).toFixed(1)}% margin).`;
+      return `YTD Gross Profit: ${fmt(ytd)} (${((ytd/ytdRev)*100).toFixed(1)}% margin).`;
     }
     return "I can help with questions about FCA's revenue, expenses, plan vs actuals, and more. Try asking about YTD Revenue, vs Plan, Top Expenses, or Net Income.";
   };
@@ -1927,7 +1924,7 @@ function WishListForm({ item, onSave, onCancel }) {
   const CATEGORIES = ["Software","Headcount","Marketing","Travel","Security","Hardware","Training","Recruiting","Compensation","IT Services","Sales","Other"];
 
   return (
-    <div style={{ background: "#0d1f3c", border: `1px solid ${C.accent}44`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
+    <div style={{ background: C.headerBg, border: `1px solid ${C.accent}44`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
       <h4 style={{ color: C.actual, margin: "0 0 14px", fontSize: 14 }}>{item ? "Edit Item" : "Add New Item"}</h4>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div>
@@ -2065,8 +2062,8 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
   const YEARS3 = [2026, 2027, 2028];
 
   const priorityColors = {
-    "Keep Lights On": "#60a5fa",
-    "Revenue Growth": "#4ade80",
+    "Keep Lights On": C.accentLight,
+    "Revenue Growth": C.positive,
     "Product": "#a78bfa",
     "Retention": "#f59e0b",
     "Security": "#f87171",
@@ -2096,34 +2093,34 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
 
       {/* Approved for Projection */}
       {approvedIds && approvedIds.size > 0 && (
-        <Card style={{ background: "#0a2440", border: `1px solid ${C.accent}55` }}>
+        <Card style={{ background: C.accentSoft, border: `1px solid ${C.accent}55` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <span style={{ color: "#4ade80", fontWeight: 700, fontSize: 14 }}>Approved for Projection</span>
-            <span style={{ background: "#16a34a33", color: "#4ade80", borderRadius: 10, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
+            <span style={{ color: C.positive, fontWeight: 700, fontSize: 14 }}>Approved for Projection</span>
+            <span style={{ background: C.positiveSoft, color: C.positive, borderRadius: 10, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
               {approvedIds.size} item{approvedIds.size !== 1 ? "s" : ""}
             </span>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {(wishList || WISH_LIST).filter(w => approvedIds.has(w.id)).map(item => (
               <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6,
-                background: "#16a34a22", border: "1px solid #16a34a55", borderRadius: 8, padding: "6px 12px" }}>
+                background: C.positiveSoft, border: "1px solid #16a34a55", borderRadius: 8, padding: "6px 12px" }}>
                 <span style={{ color: C.text, fontSize: 12 }}>{item.name}</span>
-                <span style={{ color: "#4ade80", fontSize: 11, fontWeight: 600 }}>{fmt(item.annualCost)}/yr</span>
+                <span style={{ color: C.positive, fontSize: 11, fontWeight: 600 }}>{fmt(item.annualCost)}/yr</span>
                 <button onClick={() => setApprovedIds(prev => { const n = new Set(prev); n.delete(item.id); return n; })}
                   style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 12, padding: 0 }}>✕</button>
               </div>
             ))}
           </div>
           <div style={{ marginTop: 10, color: C.textDim, fontSize: 12 }}>
-            Total approved: <strong style={{ color: "#4ade80" }}>
-              {fmt((wishList || WISH_LIST).filter(w => approvedIds.has(w.id)).reduce((s,w) => s + w.annualCost, 0), true)}/yr
+            Total approved: <strong style={{ color: C.positive }}>
+              {fmt((wishList || WISH_LIST).filter(w => approvedIds.has(w.id)).reduce((s,w) => s + w.annualCost, 0))}/yr
             </strong>
           </div>
-          <div style={{ marginTop: 12, padding: "10px 12px", background: "#0d1f3c", borderRadius: 8, border: `1px solid ${C.accent}33` }}>
+          <div style={{ marginTop: 12, padding: "10px 12px", background: C.headerBg, borderRadius: 8, border: `1px solid ${C.accent}33` }}>
             <div style={{ color: C.textDim, fontSize: 11, marginBottom: 6, fontWeight: 600 }}>P&L Impact Preview (monthly add to projection)</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {(wishList || WISH_LIST).filter(w => approvedIds.has(w.id) && w.glCode).map(item => (
-                <div key={item.id} style={{ background: "#1e3a6e33", border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "4px 10px", fontSize: 11 }}>
+                <div key={item.id} style={{ background: C.headerBg, border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "4px 10px", fontSize: 11 }}>
                   <span style={{ color: C.textDim }}>{item.glCode}: </span>
                   <span style={{ color: C.projection, fontWeight: 600 }}>+{fmt(Math.round((item.annualCost||0)/12))}/mo</span>
                   <span style={{ color: C.textDim, fontSize: 10 }}> ({item.startMonth||"Jan"} {item.startYear||2026}–{item.endMonth||"Dec"} {item.endYear||2028})</span>
@@ -2166,7 +2163,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                 <td style={{ padding: "10px 12px", color: C.text }}>{label}</td>
                 {YEARS3.map(yr => (
                   <td key={yr} style={{ textAlign: "right", padding: "10px 12px", color: yr === 2026 ? C.actual : C.projection }}>
-                    {fmt(baseKPIs(yr)[key], true)}
+                    {fmt(baseKPIs(yr)[key])}
                   </td>
                 ))}
               </tr>
@@ -2175,7 +2172,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
               <td style={{ padding: "10px 12px", color: "#f97316", fontWeight: 600 }}>Wish List Add</td>
               {YEARS3.map(yr => (
                 <td key={yr} style={{ textAlign: "right", padding: "10px 12px", color: "#f97316" }}>
-                  {fmt(wishAdd, true)}
+                  {fmt(wishAdd)}
                 </td>
               ))}
             </tr>
@@ -2186,7 +2183,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                 return (
                   <td key={yr} style={{ textAlign: "right", padding: "10px 12px",
                     color: adjNI >= 0 ? C.positive : C.negative, fontWeight: 700 }}>
-                    {fmt(adjNI, true)}
+                    {fmt(adjNI)}
                   </td>
                 );
               })}
@@ -2207,7 +2204,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
             </button>
           </div>
           <div style={{ color: C.textDim, fontSize: 11, marginTop: 4 }}>
-            {checked.size} of {(wishList || WISH_LIST).length} items active — Total: {fmt(wishAdd, true)} annual
+            {checked.size} of {(wishList || WISH_LIST).length} items active — Total: {fmt(wishAdd)} annual
           </div>
         </div>
         {(showAddForm || editingItem) && (
@@ -2231,7 +2228,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
-              <tr style={{ background: "#0d1f3c" }}>
+              <tr style={{ background: C.bg, borderBottom: `1px solid ${C.cardBorder}` }}>
                 <th style={{ padding: "10px 12px", textAlign: "center", color: C.textDim, width: 36 }}>✓</th>
                 <th style={{ padding: "10px 12px", textAlign: "left", color: C.textDim }}>Name</th>
                 <th style={{ padding: "10px 12px", textAlign: "left", color: C.textDim }}>Requester</th>
@@ -2291,7 +2288,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                             }
                           }}
                           style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer",
-                            border: "none", background: approvedIds?.has(item.id) ? "#16a34a" : "#1e3a6e",
+                            border: "none", background: approvedIds?.has(item.id) ? C.positive : C.textDim,
                             color: approvedIds?.has(item.id) ? "white" : C.textDim }}>
                           {approvedIds?.has(item.id) ? "✓ Approved" : "Approve"}
                         </button>
@@ -2322,7 +2319,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                             }}
                             style={{
                               padding: "3px 8px", borderRadius: 4, background: "rgba(59,130,246,0.15)",
-                              border: "1px solid rgba(59,130,246,0.4)", color: "#60a5fa",
+                              border: "1px solid rgba(59,130,246,0.4)", color: C.accentLight,
                               fontSize: 11, cursor: "pointer", marginLeft: 4, fontWeight: 600, whiteSpace: "nowrap"
                             }}
                             title="Move this approved item permanently into Projections"
@@ -2342,7 +2339,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
       {/* Rolled into Projections Section */}
       {rolledItems && rolledItems.length > 0 && (
         <Card>
-          <h4 style={{ color: "#60a5fa", margin: "0 0 12px", fontSize: 14, fontWeight: 700 }}>📥 Rolled into Projections</h4>
+          <h4 style={{ color: C.accentLight, margin: "0 0 12px", fontSize: 14, fontWeight: 700 }}>📥 Rolled into Projections</h4>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
@@ -2362,7 +2359,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                   <td style={{ padding: "6px 8px", color: C.textDim }}>{item.requester}</td>
                   <td style={{ padding: "6px 8px", color: C.projection, textAlign: "right", fontWeight: 600 }}>{fmt(item.annualCost)}/yr</td>
                   <td style={{ padding: "6px 8px", color: C.textDim }}>{item.startMonth} {item.startYear} – {item.endMonth} {item.endYear}</td>
-                  <td style={{ padding: "6px 8px", color: "#4ade80" }}>{item.rolledDate}</td>
+                  <td style={{ padding: "6px 8px", color: C.positive }}>{item.rolledDate}</td>
                 </tr>
                ))}
             </tbody>
@@ -2451,7 +2448,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
           <Card key={i} style={{ padding: 16, textAlign: "center" }}>
             <div style={{ color: C.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{k.label}</div>
             <div style={{ color: k.highlight ? C.accent : k.neg ? C.negative : C.actual, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-              {fmt(k.value, true)}
+              {fmt(k.value)}
             </div>
             <div style={{ color: C.textDim, fontSize: 11 }}>{k.sub}</div>
           </Card>
@@ -2465,7 +2462,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
           <ComposedChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} opacity={0.5} />
             <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
-            <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
+            <YAxis tickFormatter={v => fmt(v)} tick={{ fill: C.textDim, fontSize: 11 }} />
             <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, color: C.actual }}
               formatter={(v, n) => [fmt(v), n]} />
             <Bar dataKey="Base EBITDA" fill={C.accent} opacity={0.5} maxBarSize={28} radius={[3,3,0,0]} />
@@ -2570,7 +2567,7 @@ const WISH_LIST = [
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [darkMode, setDarkMode] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
   const [fontSize, setFontSize] = useState("md");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [page, setPage] = useState("dashboard");
