@@ -519,7 +519,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
       const allExpanded = parentStack.every(p => expanded.has(p));
       if (allExpanded) vis.push({ ...row, _idx: idx });
       if (i === parentStack.length) parentStack.push(a);
-    }
+    });
     return vis;
   }, [expanded]);
 
