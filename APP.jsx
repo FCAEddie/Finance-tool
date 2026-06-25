@@ -196,7 +196,7 @@ const LIGHT_THEME = {
   actual: "#16325C",
   projection: "#0B5CAB",
   projBg: "rgba(11,92,171,0.07)",
-  totalBg: "rgba(11,92,171,0.06)",
+  totalBg: "#EAF3FD",
   headerBg: "rgba(11,92,171,0.04)",
   positive: "#2E844A",
   positiveSoft: "#E3F1E8",
@@ -565,303 +565,215 @@ function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
 // ─── Page: Dashboard ──────────────────────────────────────────────────────────
 function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
   const C = useC();
-  const [selYear, setSelYear] = useState(2026);
-  const [period, setPeriod] = useState("Full Year");
-  const [selMonthIdx, setSelMonthIdx] = useState(0);
-  const [adjEbitdaInput, setAdjEbitdaInput] = useState({ 2026: "", 2027: "", 2028: "" });
-  const [customStart, setCustomStart] = useState(0);
-  const [customEnd, setCustomEnd] = useState(11);
 
-  // Live monthly KPIs for selected year (re-computes whenever overrides/approvals change)
-  const liveMonthly = useMemo(() =>
-    computeLiveKPIs(selYear, projOverrides, approvedItems, rolledItems),
-    [selYear, projOverrides, approvedItems, rolledItems]
+  const liveMonthly = React.useMemo(() =>
+    computeLiveKPIs(2026, projOverrides, approvedItems, rolledItems),
+    [projOverrides, approvedItems, rolledItems]
   );
 
-  const getKPIsForPeriod = () => {
-    let months;
-    if (period === "YTD") months = liveMonthly.slice(0, ACTUALS_THRU + 1);
-    else if (period === "Monthly") months = [liveMonthly[selMonthIdx]].filter(Boolean);
-    else if (period === "Custom") months = liveMonthly.slice(customStart, customEnd + 1);
-    else months = liveMonthly;
-    const s = (key) => months.reduce((acc, m) => acc + (m[key] ?? 0), 0);
-    const rev = s("rev"), cogs = s("cogs"), gp = s("gp"), exp = s("exp"), ni = s("ni"), ebitda = s("ebitda");
-    return {
-      revenue: rev, cogs, grossProfit: gp, expenses: exp, netIncome: ni, ebitda,
-      fcf: ebitda * 0.72, adjEbitda: ebitda,
-      gpMargin: rev ? gp / rev : 0, niMargin: rev ? ni / rev : 0, ebitdaMargin: rev ? ebitda / rev : 0,
-    };
-  };
+  const ytdMonths = liveMonthly.slice(0, ACTUALS_THRU + 1);
+  const sum = (arr, key) => arr.reduce((s, m) => s + (m[key] ?? 0), 0);
 
-  const kpi = getKPIsForPeriod();
-  const prevLiveMonthly = useMemo(() =>
-    selYear > 2026 ? computeLiveKPIs(selYear - 1, projOverrides, approvedItems, rolledItems) : null,
-    [selYear, projOverrides, approvedItems, rolledItems]
-  );
-  const prevKpi = useMemo(() => {
-    if (!prevLiveMonthly) return null;
-    const s = (key) => prevLiveMonthly.reduce((acc, m) => acc + (m[key] ?? 0), 0);
-    const rev = s("rev"), cogs = s("cogs"), gp = s("gp"), exp = s("exp"), ni = s("ni"), ebitda = s("ebitda");
-    return { revenue: rev, cogs, grossProfit: gp, expenses: exp, netIncome: ni, ebitda, fcf: ebitda * 0.72, adjEbitda: ebitda };
-  }, [prevLiveMonthly]);
+  const ytdRev    = sum(ytdMonths, "rev");
+  const ytdCogs   = sum(ytdMonths, "cogs");
+  const ytdGP     = sum(ytdMonths, "gp");
+  const ytdOpex   = sum(ytdMonths, "opex");
+  const ytdEbitda = sum(ytdMonths, "ebitda");
+  const ytdNI     = sum(ytdMonths, "ni");
 
-  const getChartDataForPeriod = () => {
-    const full = liveMonthly.map((m, i) => ({
-      month: MONTHS[i],
-      Revenue: m.rev,
-      "Gross Profit": m.gp,
-      Expenses: m.exp,
-      "Net Income": m.ni,
-      isActual: isActualMonth(selYear, i),
-    }));
-    if (period === "YTD") return full.slice(0, ACTUALS_THRU + 1);
-    if (period === "Monthly") return [full[selMonthIdx]].filter(Boolean);
-    if (period === "Custom") return full.slice(customStart, customEnd + 1);
-    return full;
-  };
-  const chartData = getChartDataForPeriod();
+  const ytdPlanRev    = (PLAN_2026.rev  || []).slice(0, ACTUALS_THRU+1).reduce((s,v)=>s+(v??0),0);
+  const ytdPlanCogs   = (PLAN_2026.cogs || []).slice(0, ACTUALS_THRU+1).reduce((s,v)=>s+(v??0),0);
+  const ytdPlanGP     = ytdPlanRev - ytdPlanCogs;
+  const ytdPlanExp    = (PLAN_2026.exp  || []).slice(0, ACTUALS_THRU+1).reduce((s,v)=>s+(v??0),0);
+  const ytdPlanDA     = (PLAN_2026.da   || []).slice(0, ACTUALS_THRU+1).reduce((s,v)=>s+(v??0),0);
+  const ytdPlanEbitda = ytdPlanGP - ytdPlanExp + ytdPlanDA;
+  const ytdPlanNI     = (PLAN_2026.ni   || []).slice(0, ACTUALS_THRU+1).reduce((s,v)=>s+(v??0),0);
 
-  const ytChange = (curr, prev) => prev && prev !== 0 ? (curr - prev) / Math.abs(prev) : null;
+  const fyMonths  = liveMonthly;
+  const fyRev     = sum(fyMonths, "rev");
+  const fyCogs    = sum(fyMonths, "cogs");
+  const fyGP      = sum(fyMonths, "gp");
+  const fyOpex    = sum(fyMonths, "opex");
+  const fyEbitda  = sum(fyMonths, "ebitda");
+  const fyNI      = sum(fyMonths, "ni");
+  const fyPlanRev    = (PLAN_2026.rev  || []).reduce((s,v)=>s+(v??0),0);
+  const fyPlanCogs   = (PLAN_2026.cogs || []).reduce((s,v)=>s+(v??0),0);
+  const fyPlanGP     = fyPlanRev - fyPlanCogs;
+  const fyPlanExp    = (PLAN_2026.exp  || []).reduce((s,v)=>s+(v??0),0);
+  const fyPlanDA     = (PLAN_2026.da   || []).reduce((s,v)=>s+(v??0),0);
+  const fyPlanEbitda = fyPlanGP - fyPlanExp + fyPlanDA;
+  const fyPlanNI     = (PLAN_2026.ni   || []).reduce((s,v)=>s+(v??0),0);
 
-  const annualSummary = useMemo(() => YEARS.map(yr => {
-    const monthly = computeLiveKPIs(yr, projOverrides, approvedItems, rolledItems);
-    const s = (key) => monthly.reduce((acc, m) => acc + (m[key] ?? 0), 0);
-    return { year: yr, revenue: s("rev"), cogs: s("cogs"), grossProfit: s("gp"), expenses: s("exp"), netIncome: s("ni"), ebitda: s("ebitda") };
-  }), [projOverrides, approvedItems, rolledItems]);
+  const pctVsPlan = (a, p) => p ? (a - p) / Math.abs(p) : 0;
+
+  const kpis = [
+    { label: "Total Income",       value: ytdRev,    delta: pctVsPlan(ytdRev,    ytdPlanRev)      },
+    { label: "Gross Profit",       value: ytdGP,     delta: pctVsPlan(ytdGP,     ytdPlanGP)       },
+    { label: "Operating Expenses", value: ytdOpex,   delta: pctVsPlan(ytdOpex,   ytdPlanExp) * -1 },
+    { label: "Adj. EBITDA",        value: ytdEbitda, delta: pctVsPlan(ytdEbitda, ytdPlanEbitda)   },
+  ];
+
+  const snapshotRows = [
+    { name: "Total Revenue",      a: ytdRev,    p: ytdPlanRev,    fy: fyRev,    highlight: false },
+    { name: "Cost of Sales",      a: ytdCogs,   p: ytdPlanCogs,   fy: fyCogs,   highlight: false },
+    { name: "Gross Profit",       a: ytdGP,     p: ytdPlanGP,     fy: fyGP,     highlight: true  },
+    { name: "Operating Expenses", a: ytdOpex,   p: ytdPlanExp,    fy: fyOpex,   highlight: false },
+    { name: "EBITDA",             a: ytdEbitda, p: ytdPlanEbitda, fy: fyEbitda, highlight: true  },
+    { name: "Net Income",         a: ytdNI,     p: ytdPlanNI,     fy: fyNI,     highlight: false },
+  ];
+
+  const revChartData = MONTHS.map((m, i) => ({
+    month: m,
+    actual:    i <= ACTUALS_THRU ? liveMonthly[i].rev : null,
+    plan:      PLAN_2026.rev[i] ?? 0,
+    projected: i > ACTUALS_THRU  ? liveMonthly[i].rev : null,
+  }));
+  const chartMax = Math.max(...liveMonthly.map(m => m.rev), ...(PLAN_2026.rev||[]).filter(Boolean)) * 1.18;
+
+  const expColors = ["#00346B","#66A9D9","#B3D4EC","#D4E7F5","#EEF6FC"];
+  const expPcts   = [46, 17, 14, 13, 10];
+  const expLabels = ["Salaries & payroll","Cost of sales","Marketing","Operations","Other"];
+  const conicParts = expPcts.map((pct, idx) => {
+    const start = expPcts.slice(0, idx).reduce((a, x) => a + x, 0);
+    return `${expColors[idx]} ${start}% ${start + pct}%`;
+  });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Year Selector */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Financial Overview</h2>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {YEARS.map(yr => (
-            <button key={yr} onClick={() => setSelYear(yr)}
-              style={{ padding: "6px 16px", borderRadius: 8, border: `1px solid ${selYear === yr ? C.accent : C.cardBorder}`,
-                background: selYear === yr ? C.accent : "transparent", color: C.actual, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-              {yr}
-            </button>
-          ))}
+    <div>
+      <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:28, gap:20 }}>
+        <div>
+          <h1 style={{ margin:0, fontSize:26, fontWeight:700, color:C.actual, letterSpacing:"-0.02em", lineHeight:1.2 }}>Financial Overview</h1>
+          <p style={{ margin:"6px 0 0", fontSize:13.5, color:C.textDim }}>Fiscal Year 2026 &middot; Actuals through May &middot; Live data</p>
         </div>
-      </div>
-
-      {/* Period Selector */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {["Full Year", "YTD", "Monthly", "Custom"].map(p => (
-          <button key={p} onClick={() => setPeriod(p)}
-            style={{ padding: "5px 14px", borderRadius: 8, border: `1px solid ${period === p ? C.accent : C.cardBorder}`,
-              background: period === p ? C.accent : "transparent", color: C.actual, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-            {p}{p === "YTD" ? " (Jan–May)" : ""}
+        <div style={{ display:"flex", gap:10, flexShrink:0 }}>
+          <button style={{ display:"flex", alignItems:"center", gap:7, background:C.card, border:`1px solid ${C.cardBorder}`,
+            color:C.actual, borderRadius:999, padding:"9px 18px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+            <Download size={15} /> Export
           </button>
-        ))}
-        {period === "Monthly" && (
-          <select value={selMonthIdx} onChange={e => setSelMonthIdx(parseInt(e.target.value))}
-            style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, color: C.actual, padding: "5px 10px", fontSize: 12 }}>
-            {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
-          </select>
-        )}
-        {period === "Custom" && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
-            <span style={{ color: C.textDim, fontSize: 12 }}>From:</span>
-            <select value={customStart} onChange={e => setCustomStart(+e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.cardBorder}`, borderRadius: 4, padding: "2px 6px" }}>
-              {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
-            </select>
-            <span style={{ color: C.textDim, fontSize: 12 }}>To:</span>
-            <select value={customEnd} onChange={e => setCustomEnd(+e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.cardBorder}`, borderRadius: 4, padding: "2px 6px" }}>
-              {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
-            </select>
-          </div>
-        )}
-      </div>
-
-      {/* KPI Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
-        <KPICard label="Total Revenue" value={kpi.revenue} compact
-          change={prevKpi ? ytChange(kpi.revenue, prevKpi.revenue) : null} />
-        <KPICard label="Gross Profit" value={kpi.grossProfit}
-          sub={`Margin: ${pct(kpi.gpMargin)}`} compact
-          change={prevKpi ? ytChange(kpi.grossProfit, prevKpi.grossProfit) : null} />
-        <KPICard label="Total Expenses" value={kpi.expenses} compact
-          change={prevKpi ? ytChange(kpi.expenses, prevKpi.expenses) : null} />
-        <KPICard label="Net Income" value={kpi.netIncome}
-          sub={`Margin: ${pct(kpi.niMargin)}`} compact
-          change={prevKpi ? ytChange(kpi.netIncome, prevKpi.netIncome) : null} />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-        <KPICard label="EBITDA" value={kpi.ebitda}
-          sub={`Margin: ${pct(kpi.ebitdaMargin)}`} compact
-          change={prevKpi ? ytChange(kpi.ebitda, prevKpi.ebitda) : null} />
-        <KPICard label="Free Cash Flow (est.)" value={kpi.fcf} compact
-          change={prevKpi ? ytChange(kpi.fcf, prevKpi.fcf) : null} />
-        <KPICard label="Adj. EBITDA" value={kpi.adjEbitda} compact
-          change={prevKpi ? ytChange(kpi.adjEbitda, prevKpi.adjEbitda) : null} />
-      </div>
-
-      {/* Monthly Revenue vs Plan Chart */}
-      <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ color: C.actual, margin: 0, fontSize: 15 }}>Revenue vs Plan – {selYear}</h3>
-          <div style={{ display: "flex", gap: 12, fontSize: 11 }}>
-            <span style={{ color: "#2563eb" }}>■ Revenue</span>
-            {selYear === 2026 && <span style={{ color: "#f97316" }}>— Plan</span>}
-          </div>
+          <button onClick={() => onNav("scenarios")}
+            style={{ display:"flex", alignItems:"center", gap:7, background:C.accent, border:"none",
+              color:"#fff", borderRadius:999, padding:"9px 18px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+            <Plus size={15} /> New scenario
+          </button>
         </div>
-        {(() => {
-          const planRevData = selYear === 2026
-            ? (period === "YTD" ? PLAN_2026.rev.slice(0, 5)
-               : period === "Monthly" ? [PLAN_2026.rev[selMonthIdx]]
-               : period === "Custom" ? PLAN_2026.rev.slice(customStart, customEnd + 1)
-               : PLAN_2026.rev)
-            : null;
-          const revChartData = chartData.map((d, i) => ({
-            ...d,
-            Plan: planRevData ? planRevData[i] || 0 : undefined,
-          }));
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:18, marginBottom:22 }}>
+        {kpis.map(k => {
+          const isPos = k.delta >= 0;
           return (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={revChartData} barCategoryGap="25%" barGap={2}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} />
-                <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
-                <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
-                <Tooltip formatter={(v, n) => [fmt(v, true), n]} contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, color: C.text }} />
-                <Legend wrapperStyle={{ color: C.textDim, fontSize: 12 }} />
-                <Bar dataKey="Revenue" fill="#2563eb" radius={[3,3,0,0]} />
-                {selYear === 2026 && <Bar dataKey="Plan" fill="#f97316" radius={[3,3,0,0]} />}
-              </BarChart>
-            </ResponsiveContainer>
+            <div key={k.label} style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, boxShadow:C.shadow, padding:"20px 20px 18px" }}>
+              <div style={{ fontSize:10.5, fontWeight:600, letterSpacing:"0.07em", textTransform:"uppercase", color:C.textDim, marginBottom:10 }}>{k.label}</div>
+              <div style={{ fontSize:28, fontWeight:700, color:C.actual, letterSpacing:"-0.02em", lineHeight:1.1, marginBottom:12 }}>{fmt(k.value)}</div>
+              <div style={{ display:"inline-flex", alignItems:"center", gap:5,
+                background: isPos ? C.positiveSoft : C.negativeSoft,
+                color: isPos ? C.positive : C.negative,
+                borderRadius:999, padding:"4px 10px", fontSize:11.5, fontWeight:600 }}>
+                {isPos ? <ArrowUpRight size={12}/> : <ArrowDownRight size={12}/>}
+                {(Math.abs(k.delta)*100).toFixed(1)}% vs Plan
+              </div>
+            </div>
           );
-        })()}
-      </Card>
+        })}
+      </div>
 
-      {/* 3-Year Annual Summary Table */}
-      <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ color: C.actual, margin: 0, fontSize: 15 }}>3-Year Summary</h3>
-          <span style={{ fontSize: 11, color: C.textDim }}>Click a row to drill into Full P&L</span>
+      <div style={{ display:"grid", gridTemplateColumns:"1.85fr 1fr", gap:18, marginBottom:22 }}>
+        <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, boxShadow:C.shadow, padding:"22px 24px" }}>
+          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:18 }}>
+            <div>
+              <h3 style={{ margin:0, fontSize:15, fontWeight:600, color:C.actual }}>Revenue vs Plan</h3>
+              <p style={{ margin:"3px 0 0", fontSize:12, color:C.textDim }}>Monthly recognized revenue</p>
+            </div>
+            <div style={{ display:"flex", gap:14, fontSize:11.5, color:C.textDim }}>
+              <span style={{ display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ width:10, height:10, borderRadius:2, background:C.chartActual, display:"inline-block" }}></span>Actuals
+              </span>
+              <span style={{ display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ width:11, height:11, borderRadius:2, display:"inline-block",
+                  background:`repeating-linear-gradient(45deg,${C.chartProj} 0 2px,#fff 2px 4px)`,
+                  border:`1px solid ${C.chartProj}` }}></span>Plan / Projection
+              </span>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <ComposedChart data={revChartData} margin={{ top:4, right:4, left:-10, bottom:0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} vertical={false} />
+              <XAxis dataKey="month" tick={{ fontSize:10.5, fill:C.textDim }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={v=>`$${(v/1e6).toFixed(1)}M`} tick={{ fontSize:10.5, fill:C.textDim }} axisLine={false} tickLine={false} domain={[0,chartMax]} />
+              <Tooltip formatter={(v,n)=>[fmt(v), n==="actual"?"Actual":n==="plan"?"Plan":"Projected"]}
+                contentStyle={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:8, fontSize:12 }} />
+              <Bar dataKey="plan"      fill={C.chartProj} opacity={0.4} radius={[3,3,0,0]} name="Plan" />
+              <Bar dataKey="actual"    fill={C.chartActual} radius={[3,3,0,0]} name="Actual" />
+              <Bar dataKey="projected" fill={C.chartProj} radius={[3,3,0,0]} name="Projected" />
+            </ComposedChart>
+          </ResponsiveContainer>
         </div>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
-              <th style={{ textAlign: "left", color: C.textDim, padding: "8px 12px", fontWeight: 500 }}>Metric</th>
-              <th style={{ textAlign: "right", color: C.actual, padding: "8px 12px", fontWeight: 600 }}>2026 Actual/Proj <span style={{fontSize:9,color:C.textDim}}>(Jan–May Actual)</span></th>
-              <th style={{ textAlign: "right", color: "#f97316", padding: "8px 12px", fontWeight: 600 }}>2026 Plan</th>
-              <th style={{ textAlign: "right", color: C.textDim, padding: "8px 12px", fontWeight: 500 }}>Variance $</th>
-              <th style={{ textAlign: "right", color: C.textDim, padding: "8px 12px", fontWeight: 500 }}>Variance %</th>
-              <th style={{ textAlign: "right", color: C.projection, padding: "8px 12px", fontWeight: 600 }}>2027 <span style={{fontSize:9,color:C.projection}}>(Projected)</span></th>
-              <th style={{ textAlign: "right", color: C.projection, padding: "8px 12px", fontWeight: 600 }}>2028 <span style={{fontSize:9,color:C.projection}}>(Projected)</span></th>
-              <th style={{ textAlign: "right", color: C.textDim, padding: "8px 12px", fontWeight: 500 }}>YoY 26→27</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(() => {
-              const planTotals = {
-                revenue: 19683336, cogs: 3281440, grossProfit: 16401613,
-                expenses: 12998406, netIncome: 1627632,
-                gpMargin: 19683336 ? 16401613 / 19683336 : 0,
-                niMargin: 19683336 ? 1627632 / 19683336 : 0,
-                ebitda: sum(PLAN_2026.da) + 1627632,
-                da: sum(PLAN_2026.da),
-              };
-              return [
-                { label: "Revenue", key: "revenue", nav: "fullpl", bold: true },
-                { label: "  COGS", key: "cogs", nav: "fullpl", indent: true },
-                { label: "Gross Profit", key: "grossProfit", nav: "fullpl", highlight: true },
-                { label: "GP Margin %", key: "gpMargin", isMar: true },
-                { label: "  Expenses", key: "expenses", nav: "fullpl", indent: true },
-                { label: "  D&A", key: "da", indent: true },
-                { label: "Net Income", key: "netIncome", nav: "fullpl", highlight: true, bold: true },
-                { label: "NI Margin %", key: "niMargin", isMar: true },
-                { label: "EBITDA", key: "ebitda", nav: "fullpl", highlight: true },
-                { label: "EBITDA Margin %", key: "ebitdaMar", isMar: true },
-                { label: "Adj. EBITDA", key: "adjEbitda", isInput: true },
-              ].map(({ label, key, isMar, nav, bold, indent, highlight, isInput }) => {
-                const getVal = (yr) => {
-                  const liveYear = annualSummary.find(s => s.year === yr) || {};
-                  if (key === "da") { return (liveYear.ebitda ?? 0) - (liveYear.netIncome ?? 0); }
-                  if (key === "ebitdaMar") { return liveYear.revenue ? (liveYear.ebitda ?? 0) / liveYear.revenue : 0; }
-                  if (key === "adjEbitda") { const inputVal = adjEbitdaInput[yr]; return inputVal !== "" ? parseFloat(inputVal.replace(/[,$]/g, "")) || 0 : (liveYear.ebitda ?? 0); }
-                  return liveYear[key] ?? 0;
-                };
-                const getPlanVal = () => {
-                  if (key === "ebitdaMar") return planTotals.revenue ? planTotals.ebitda / planTotals.revenue : 0;
-                  if (key === "adjEbitda") return planTotals.ebitda;
-                  return planTotals[key] ?? 0;
-                };
-                const vals = YEARS.map(yr => getVal(yr));
-                const planVal = getPlanVal();
-                const change = vals[0] && vals[1] ? (vals[1] - vals[0]) / Math.abs(vals[0]) : null;
-                const isExpense = key === "expenses" || key === "cogs" || key === "da";
-                return (
-                  <tr key={key} onClick={() => nav && onNav(nav)}
-                    style={{ borderBottom: `1px solid ${C.cardBorder}33`, cursor: nav ? "pointer" : "default",
-                      background: highlight ? C.totalBg : "transparent" }}
-                    onMouseEnter={e => nav && (e.currentTarget.style.background = "#1e3a6e44")}
-                    onMouseLeave={e => e.currentTarget.style.background = highlight ? C.totalBg : "transparent"}>
-                    <td style={{ padding: "10px 12px", color: C.text, fontWeight: bold ? 700 : 400, paddingLeft: indent ? 24 : 12 }}>
-                      {nav && <span style={{ marginRight: 6 }}><TableProperties size={12} style={{ verticalAlign: "middle", color: C.accentLight }} /></span>}
-                      {label}
-                    </td>
-                    {/* 2026 Actual/Proj */}
-                    {isInput ? (
-                      <td style={{ textAlign: "right", padding: "6px 12px" }}>
-                        <input
-                          type="text"
-                          value={adjEbitdaInput[YEARS[0]] !== "" ? adjEbitdaInput[YEARS[0]] : fmt(vals[0], true)}
-                          onChange={e => setAdjEbitdaInput(prev => ({ ...prev, [YEARS[0]]: e.target.value }))}
-                          style={{ width: 110, textAlign: "right", background: "rgba(59,130,246,0.15)", border: `1px solid ${C.accent}`, borderRadius: 4, color: C.actual, padding: "3px 6px", fontSize: 12 }}
-                        />
-                      </td>
-                    ) : (
-                      <td style={{ textAlign: "right", padding: "10px 12px", color: C.actual, fontWeight: bold ? 700 : 400 }}>
-                        {isMar ? pct(vals[0]) : fmt(vals[0], true)}
-                      </td>
-                    )}
-                    {/* 2026 Plan */}
-                    <td style={{ textAlign: "right", padding: "10px 12px", color: "#f97316", fontWeight: 500 }}>
-                      {isMar ? pct(planVal) : fmt(planVal, true)}
-                    </td>
-                    {/* Variance $ */}
-                    {(() => {
-                      if (isMar) return <td style={{ textAlign: "right", padding: "10px 12px", color: C.textDim }}>—</td>;
-                      const varAmt = vals[0] - planVal;
-                      const favorable = isExpense ? varAmt <= 0 : varAmt >= 0;
-                      return (
-                        <td style={{ textAlign: "right", padding: "10px 12px", color: favorable ? C.positive : C.negative, fontWeight: 500 }}>
-                          {varAmt >= 0 ? "+" : ""}{fmt(varAmt, true)}
-                        </td>
-                      );
-                    })()}
-                    {/* Variance % */}
-                    {(() => {
-                      if (isMar || !planVal) return <td style={{ textAlign: "right", padding: "10px 12px", color: C.textDim }}>—</td>;
-                      const varPct = (vals[0] - planVal) / Math.abs(planVal);
-                      const favorable = isExpense ? varPct <= 0 : varPct >= 0;
-                      return (
-                        <td style={{ textAlign: "right", padding: "10px 12px", color: favorable ? C.positive : C.negative, fontWeight: 500 }}>
-                          {varPct >= 0 ? "+" : ""}{(varPct * 100).toFixed(1)}%
-                        </td>
-                      );
-                    })()}
-                    {/* 2027 */}
-                    <td style={{ textAlign: "right", padding: "10px 12px", color: C.projection, fontWeight: bold ? 700 : 400 }}>
-                      {isMar ? pct(vals[1]) : fmt(vals[1], true)}
-                    </td>
-                    {/* 2028 */}
-                    <td style={{ textAlign: "right", padding: "10px 12px", color: C.projection, fontWeight: bold ? 700 : 400 }}>
-                      {isMar ? pct(vals[2]) : fmt(vals[2], true)}
-                    </td>
-                    {/* YoY 26→27 */}
-                    <td style={{ textAlign: "right", padding: "10px 12px", color: change != null ? (isExpense ? (change < 0 ? C.positive : C.negative) : (change > 0 ? C.positive : C.negative)) : C.muted }}>
-                      {change != null ? `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%` : "—"}
-                    </td>
-                  </tr>
-                );
-              });
-            })()}
-          </tbody>
-        </table>
-      </Card>
 
+        <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, boxShadow:C.shadow, padding:"22px 24px" }}>
+          <h3 style={{ margin:"0 0 2px", fontSize:15, fontWeight:600, color:C.actual }}>Expense Breakdown</h3>
+          <p style={{ margin:"0 0 14px", fontSize:12, color:C.textDim }}>YTD operating spend</p>
+          <div style={{ position:"relative", width:148, height:148, borderRadius:"50%", margin:"0 auto 16px",
+            background:`conic-gradient(${conicParts.join(", ")})` }}>
+            <div style={{ position:"absolute", inset:20, background:C.card, borderRadius:"50%",
+              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+              <span style={{ fontSize:10.5, color:C.textDim, textAlign:"center" }}>YTD spend</span>
+              <span style={{ fontSize:18, fontWeight:700, color:C.actual, letterSpacing:"-0.02em" }}>{fmt(ytdCogs + ytdOpex)}</span>
+            </div>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:9 }}>
+            {expLabels.map((label, idx) => (
+              <div key={label} style={{ display:"flex", alignItems:"center", fontSize:12.5 }}>
+                <span style={{ width:8, height:8, borderRadius:"50%", background:expColors[idx], marginRight:9, flexShrink:0 }}></span>
+                <span style={{ color:C.actual, flex:1 }}>{label}</span>
+                <span style={{ color:C.textDim, fontWeight:600 }}>{expPcts[idx]}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, boxShadow:C.shadow, padding:"22px 24px" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+          <div>
+            <h3 style={{ margin:0, fontSize:15, fontWeight:600, color:C.actual }}>P&amp;L Snapshot</h3>
+            <p style={{ margin:"3px 0 0", fontSize:12, color:C.textDim }}>
+              Year to date vs Plan &middot;{" "}
+              <button onClick={()=>onNav("fullpl")} style={{ background:"none",border:"none",color:C.accent,cursor:"pointer",fontSize:12,padding:0,fontWeight:600 }}>Full P&amp;L &#8594;</button>
+            </p>
+          </div>
+          <span style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize:11.5, fontWeight:600,
+            color:C.negative, background:C.negativeSoft, padding:"4px 10px", borderRadius:999 }}>
+            <span style={{ width:6, height:6, borderRadius:"50%", background:C.negative, display:"inline-block" }}></span>Live
+          </span>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",
+          padding:"8px 8px 10px", borderBottom:`2px solid ${C.cardBorder}`,
+          fontSize:10.5, fontWeight:700, letterSpacing:"0.05em", textTransform:"uppercase", color:C.textDim }}>
+          <span>Account</span>
+          <span style={{ textAlign:"right" }}>Actual YTD</span>
+          <span style={{ textAlign:"right" }}>Plan YTD</span>
+          <span style={{ textAlign:"right" }}>Variance</span>
+          <span style={{ textAlign:"right" }}>FY Forecast</span>
+        </div>
+        {snapshotRows.map(r => {
+          const variance = r.a - r.p;
+          const isPos = variance >= 0;
+          return (
+            <div key={r.name} style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",
+              padding:"11px 8px", borderBottom:`1px solid ${C.cardBorder}`,
+              background: r.highlight ? C.totalBg : "transparent",
+              fontSize:13.5, color:C.actual, alignItems:"center" }}>
+              <span style={{ fontWeight: r.highlight ? 700 : 400 }}>{r.name}</span>
+              <span style={{ textAlign:"right", fontWeight:600 }}>{fmt(r.a)}</span>
+              <span style={{ textAlign:"right", color:C.textDim }}>{fmt(r.p)}</span>
+              <span style={{ textAlign:"right", fontWeight:600, color: isPos ? C.positive : C.negative }}>
+                {variance>=0?"+":""}{fmt(variance)}
+              </span>
+              <span style={{ textAlign:"right", color:C.textDim }}>{fmt(r.fy)}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
