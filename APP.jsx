@@ -229,7 +229,7 @@ const KPICard = ({ label, value, sub, change }) => {
   return (
     <Card style={{ padding: "20px 20px 18px", textAlign: "left", display: "flex", flexDirection: "column" }}>
       <div style={{ color: C.textDim, fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>{label}</div>
-      <div style={{ color: C.actual, fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.1, marginBottom: 8 }}>{fmt(value, compact)}</div>
+      <div style={{ color: C.actual, fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.1, marginBottom: 8 }}>{fmt(value)}</div>
       {sub && <div style={{ color: C.textDim, fontSize: 11, marginBottom: 4 }}>{sub}</div>}
       {change != null && (
         <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: "auto",
