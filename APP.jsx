@@ -166,7 +166,7 @@ const getMonthlyChart = (year) => {
 // ─── Color themes ────────────────────────────────────────────────────────────
 const DARK_THEME = {
   bg: "#0f1e2e", card: "#162033", cardBorder: "#1e3a62",
-  accent: "#1B96FF", accentLight: C.accentLight, accentSoft: "rgba(27,150,255,0.15)",
+  accent: "#1B96FF", accentLight: "#60a5fa", accentSoft: "rgba(27,150,255,0.15)",
   actual: "#e2e8f0", projection: "#93c5fd",
   projBg: "rgba(27,150,255,0.10)",
   totalBg: "rgba(42,82,152,0.45)", headerBg: "rgba(42,82,152,0.25)",
