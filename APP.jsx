@@ -212,6 +212,296 @@ const Badge = ({ children, color }) => {
   );
 };
 
+// ─── Page: Revenue vs Plan ────────────────────────────────────────────────────
+function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
+  const C = useC();
+  const [year, setYear] = useState(2026);
+  const [view, setView] = useState("monthly"); // "monthly" | "ytd"
+  const [expandedGL, setExpandedGL] = useState(false);
+
+  // Revenue leaf GL rows with their indices
+  const revRows = useMemo(() =>
+    UNIFIED_PL.map((r, idx) => ({ ...r, _idx: idx }))
+      .filter(r => r.type === "revenue" && isLeafGL(r.a)),
+    []
+  );
+
+  // Monthly actuals (null for non-actual months)
+  const monthlyRevActual = useMemo(() => Array.from({ length: 12 }, (_, m) => {
+    if (!isActualMonth(year, m)) return null;
+    return revRows.reduce((s, r) => s + (getRowData(r, year)?.[m] ?? 0), 0);
+  }), [year, revRows]);
+
+  // Monthly projected (null for actual months)
+  const monthlyRevProjected = useMemo(() => Array.from({ length: 12 }, (_, m) => {
+    if (isActualMonth(year, m)) return null;
+    return revRows.reduce((s, r) => s + computeEffective(r._idx, year, m, projOverrides, approvedItems, rolledItems), 0);
+  }), [year, revRows, projOverrides, approvedItems, rolledItems]);
+
+  const monthlyPlan = year === 2026 ? PLAN_2026.rev : null;
+
+  // Combined effective (actual where available, else projected)
+  const monthlyEffective = useMemo(() => Array.from({ length: 12 }, (_, m) =>
+    monthlyRevActual[m] !== null ? monthlyRevActual[m] : (monthlyRevProjected[m] ?? 0)
+  ), [monthlyRevActual, monthlyRevProjected]);
+
+  // Variance vs plan (2026 only)
+  const monthlyVariance = monthlyPlan
+    ? monthlyEffective.map((v, m) => v - (monthlyPlan[m] ?? 0))
+    : Array(12).fill(null);
+  const monthlyVariancePct = monthlyPlan
+    ? monthlyEffective.map((v, m) => monthlyPlan[m] ? ((v - monthlyPlan[m]) / monthlyPlan[m]) * 100 : null)
+    : Array(12).fill(null);
+
+  // YTD totals (through last actual month)
+  const ytdActual = monthlyRevActual.slice(0, ACTUALS_THRU + 1).reduce((s, v) => s + (v ?? 0), 0);
+  const ytdPlan = monthlyPlan ? monthlyPlan.slice(0, ACTUALS_THRU + 1).reduce((s, v) => s + (v ?? 0), 0) : 0;
+  const ytdVariance = ytdActual - ytdPlan;
+  const ytdVariancePct = ytdPlan ? (ytdVariance / ytdPlan) * 100 : 0;
+
+  // Full-year totals
+  const fyTotal = monthlyEffective.reduce((s, v) => s + v, 0);
+  const fyPlan = monthlyPlan ? monthlyPlan.reduce((s, v) => s + (v ?? 0), 0) : 0;
+  const fyVariance = fyTotal - fyPlan;
+  const fyVariancePct = fyPlan ? (fyVariance / fyPlan) * 100 : 0;
+
+  // Chart data
+  const chartData = MONTHS.map((m, i) => ({
+    month: m,
+    Actual: monthlyRevActual[i],
+    Projected: monthlyRevProjected[i],
+    Plan: monthlyPlan ? monthlyPlan[i] : null,
+    Variance: monthlyVariance[i],
+  }));
+
+  // Per-GL breakdown for the expandable table
+  const glRows = useMemo(() => revRows.map(r => {
+    const ytdAct = r.v26 ? r.v26.slice(0, ACTUALS_THRU + 1).reduce((s, v) => s + (v ?? 0), 0) : 0;
+    const fyProj = Array.from({ length: 12 }, (_, m) =>
+      computeEffective(r._idx, year, m, projOverrides, approvedItems, rolledItems)
+    ).reduce((s, v) => s + v, 0);
+    const fyPlanGL = r.plan26 ?? 0;
+    return { label: r.a, ytdAct, fyProj, fyPlanGL };
+  }), [revRows, year, projOverrides, approvedItems, rolledItems]);
+
+  const planColor = "#f59e0b";
+  const actualColor = C.accent;
+  const projColor = C.projection;
+
+  const varBadge = (v, pct) => {
+    if (v === null) return null;
+    const pos = v >= 0;
+    return (
+      <span style={{ color: pos ? C.positive : C.negative, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 2 }}>
+        {pos ? "▲" : "▼"} {fmt(Math.abs(v), true)}{pct !== null ? ` (${Math.abs(pct).toFixed(1)}%)` : ""}
+      </span>
+    );
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Revenue vs Plan</h2>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {YEARS.map(yr => (
+            <button key={yr} onClick={() => setYear(yr)}
+              style={{ padding: "6px 16px", borderRadius: 8, border: `1px solid ${year === yr ? C.accent : C.cardBorder}`,
+                background: year === yr ? C.accent : "transparent", color: C.actual, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              {yr}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {["monthly", "ytd"].map(v => (
+            <button key={v} onClick={() => setView(v)}
+              style={{ padding: "5px 14px", borderRadius: 8, border: `1px solid ${view === v ? C.accent : C.cardBorder}`,
+                background: view === v ? C.accent : "transparent", color: C.actual, cursor: "pointer", fontSize: 12, fontWeight: 600, textTransform: "capitalize" }}>
+              {v === "ytd" ? "YTD" : "Monthly"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI Summary Row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+        {[
+          { label: "YTD Actual Revenue", value: ytdActual, sub: `Jan–${MONTHS[ACTUALS_THRU]} ${year}` },
+          { label: year === 2026 ? "YTD Plan" : "FY Projected", value: year === 2026 ? ytdPlan : fyTotal, sub: year === 2026 ? "Jan–May 2026 Plan" : `${year} Full Year` },
+          { label: "YTD Variance $", value: year === 2026 ? ytdVariance : null, sub: year === 2026 ? (ytdVariancePct >= 0 ? "Ahead of Plan" : "Behind Plan") : "N/A (no plan)" },
+          { label: "YTD Variance %", value: null, sub: year === 2026 ? `${ytdVariancePct >= 0 ? "+" : ""}${ytdVariancePct.toFixed(1)}%` : "N/A", special: year === 2026 ? ytdVariancePct : null },
+        ].map((k, i) => (
+          <div key={i} style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: 16, textAlign: "center" }}>
+            <div style={{ color: C.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{k.label}</div>
+            {k.special !== null && k.special !== undefined ? (
+              <div style={{ fontSize: 22, fontWeight: 700, color: k.special >= 0 ? C.positive : C.negative, marginBottom: 4 }}>
+                {k.special >= 0 ? "+" : ""}{k.special.toFixed(1)}%
+              </div>
+            ) : (
+              <div style={{ color: i === 2 ? (k.value >= 0 ? C.positive : C.negative) : C.actual, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
+                {k.value !== null ? fmt(k.value, true) : "—"}
+              </div>
+            )}
+            <div style={{ color: C.textDim, fontSize: 11 }}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Revenue vs Plan Chart */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ color: C.actual, fontWeight: 600, fontSize: 15 }}>Monthly Revenue vs Plan</div>
+          <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.textDim }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 2, background: actualColor, display: "inline-block" }}></span> Actual
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 2, background: projColor, display: "inline-block" }}></span> Projected
+            </span>
+            {year === 2026 && (
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 12, height: 3, background: planColor, display: "inline-block" }}></span> Plan
+              </span>
+            )}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={280}>
+          <ComposedChart data={view === "ytd" ? chartData.slice(0, ACTUALS_THRU + 1) : chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} opacity={0.5} />
+            <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
+            <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
+            <Tooltip
+              contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, color: C.actual }}
+              formatter={(value, name) => value !== null ? [fmt(value), name] : []}
+              labelStyle={{ color: C.actual, fontWeight: 600, marginBottom: 4 }}
+            />
+            <Bar dataKey="Actual" fill={actualColor} radius={[3,3,0,0]} maxBarSize={32} />
+            <Bar dataKey="Projected" fill={projColor} opacity={0.7} radius={[3,3,0,0]} maxBarSize={32} />
+            {year === 2026 && (
+              <Line dataKey="Plan" stroke={planColor} strokeWidth={2} dot={{ r: 3, fill: planColor }} strokeDasharray="5 3" />
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Monthly Detail Table */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: `1px solid ${C.cardBorder}`, display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ color: C.actual, fontWeight: 600, fontSize: 15 }}>Monthly Detail</span>
+          {year === 2026 && <span style={{ color: C.textDim, fontSize: 11 }}>2026 — Jan–{MONTHS[ACTUALS_THRU]} are locked actuals; Jun–Dec are projections</span>}
+          {year !== 2026 && <span style={{ color: C.textDim, fontSize: 11 }}>{year} — all months are projections (no plan available)</span>}
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: C.headerBg }}>
+                {["Month", "Actual / Proj", year === 2026 ? "Plan" : null, "Variance $", "Variance %", "Status"].filter(Boolean).map(h => (
+                  <th key={h} style={{ padding: "8px 12px", color: C.textDim, fontWeight: 600, textAlign: h === "Month" || h === "Status" ? "left" : "right", borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(view === "ytd" ? chartData.slice(0, ACTUALS_THRU + 1) : chartData).map((row, i) => {
+                const isActual = monthlyRevActual[i] !== null;
+                const val = monthlyEffective[i];
+                const plan = monthlyPlan ? monthlyPlan[i] : null;
+                const vari = monthlyVariance[i];
+                const variPct = monthlyVariancePct[i];
+                return (
+                  <tr key={row.month}
+                    style={{ background: i % 2 === 0 ? "transparent" : `${C.cardBorder}22`, borderBottom: `1px solid ${C.cardBorder}33` }}>
+                    <td style={{ padding: "8px 12px", color: C.actual, fontWeight: isActual ? 600 : 400, display: "flex", alignItems: "center", gap: 6 }}>
+                      {row.month}
+                      {isActual && <span style={{ fontSize: 9 }}>🔒</span>}
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: isActual ? C.actual : C.projection, fontStyle: isActual ? "normal" : "italic" }}>
+                      {fmt(val)}
+                      {!isActual && <span style={{ fontSize: 9, marginLeft: 4, color: C.textDim }}>proj</span>}
+                    </td>
+                    {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{fmt(plan)}</td>}
+                    <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                      {vari !== null ? varBadge(vari, null) : <span style={{ color: C.textDim }}>—</span>}
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                      {variPct !== null ? (
+                        <span style={{ color: variPct >= 0 ? C.positive : C.negative, fontWeight: 600 }}>
+                          {variPct >= 0 ? "+" : ""}{variPct.toFixed(1)}%
+                        </span>
+                      ) : <span style={{ color: C.textDim }}>—</span>}
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>
+                      {isActual
+                        ? <span style={{ background: `${C.accent}22`, color: C.accent, border: `1px solid ${C.accent}55`, borderRadius: 4, padding: "2px 7px", fontSize: 10, fontWeight: 600 }}>Actual</span>
+                        : <span style={{ background: `${C.projection}22`, color: C.projection, border: `1px solid ${C.projection}55`, borderRadius: 4, padding: "2px 7px", fontSize: 10, fontWeight: 600 }}>Projected</span>
+                      }
+                    </td>
+                  </tr>
+                );
+              })}
+              {/* Full Year totals row */}
+              <tr style={{ background: C.totalBg, fontWeight: 700, borderTop: `2px solid ${C.cardBorder}` }}>
+                <td style={{ padding: "8px 12px", color: C.actual }}>Full Year</td>
+                <td style={{ padding: "8px 12px", textAlign: "right", color: C.actual }}>{fmt(fyTotal)}</td>
+                {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{fmt(fyPlan)}</td>}
+                <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                  {year === 2026 ? varBadge(fyVariance, null) : <span style={{ color: C.textDim }}>—</span>}
+                </td>
+                <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                  {year === 2026 ? (
+                    <span style={{ color: fyVariancePct >= 0 ? C.positive : C.negative, fontWeight: 700 }}>
+                      {fyVariancePct >= 0 ? "+" : ""}{fyVariancePct.toFixed(1)}%
+                    </span>
+                  ) : <span style={{ color: C.textDim }}>—</span>}
+                </td>
+                <td style={{ padding: "8px 12px" }}></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* GL Breakdown (collapsible) */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+        <button
+          onClick={() => setExpandedGL(x => !x)}
+          style={{ width: "100%", background: "none", border: "none", padding: "14px 20px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: C.actual }}>
+          {expandedGL ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <span style={{ fontWeight: 600, fontSize: 15 }}>Revenue GL Account Breakdown</span>
+          <span style={{ color: C.textDim, fontSize: 12, marginLeft: 4 }}>{glRows.length} accounts</span>
+        </button>
+        {expandedGL && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: C.headerBg }}>
+                  {["GL Account", "YTD Actual", `FY ${year} Projected`, year === 2026 ? "Plan" : null, "FY Variance"].filter(Boolean).map(h => (
+                    <th key={h} style={{ padding: "8px 12px", color: C.textDim, fontWeight: 600, textAlign: h === "GL Account" ? "left" : "right", borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {glRows.map((gl, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : `${C.cardBorder}22`, borderBottom: `1px solid ${C.cardBorder}33` }}>
+                    <td style={{ padding: "8px 12px", color: C.actual, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{gl.label}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: C.actual }}>{fmt(gl.ytdAct)}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: C.projection }}>{fmt(gl.fyProj)}</td>
+                    {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{gl.fyPlanGL ? fmt(gl.fyPlanGL) : "—"}</td>}
+                    <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                      {year === 2026 && gl.fyPlanGL ? varBadge(gl.fyProj - gl.fyPlanGL, null) : <span style={{ color: C.textDim }}>—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
 // ─── Page: Dashboard ──────────────────────────────────────────────────────────
 function Dashboard({ onNav }) {
   const C = useC();
@@ -2070,7 +2360,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                   <td style={{ padding: "6px 8px", color: C.textDim }}>{item.startMonth} {item.startYear} – {item.endMonth} {item.endYear}</td>
                   <td style={{ padding: "6px 8px", color: "#4ade80" }}>{item.rolledDate}</td>
                 </tr>
-              ))}
+               ))}
             </tbody>
           </table>
         </Card>
@@ -2079,113 +2369,199 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
   );
 }
 
-
-// ─── Wish List Data ──────────────────────────────────────────────────────────
-const WISH_LIST = [
-  { id:1, name:"HubSpot Renewal Uptick", requester:"Caitlin", category:"Software", priority:"Keep Lights On", startMonth:"Sep", annualCost:10000, status:"plan", type:"expense" },
-  { id:2, name:"AGC CA", requester:"Caitlin", category:"Marketing", priority:"Revenue Growth", startMonth:"Jan", annualCost:5000, status:"plan", type:"expense" },
-  { id:3, name:"Dialer Tool for BDRs", requester:"Caitlin", category:"Software", priority:"Revenue Growth", startMonth:"Jan", annualCost:5000, status:"plan", type:"expense" },
-  { id:4, name:"T&E (above baseline)", requester:"Eddie", category:"Travel", priority:"Revenue Growth", startMonth:"Jan", annualCost:50000, status:"plan", type:"expense" },
-  { id:5, name:"Regional Account Executive #1", requester:"Caitlin", category:"Headcount", priority:"Revenue Growth", startMonth:"Jun", annualCost:150000, status:"plan", type:"expense" },
-  { id:6, name:"Full-Time Tech Writer", requester:"Madigan/Rizzo", category:"Headcount", priority:"Product", startMonth:"Jan", annualCost:125000, status:"plan", type:"expense" },
-  { id:7, name:"Customer Help/KB Platform", requester:"Madigan/Rizzo", category:"Software", priority:"Keep Lights On", startMonth:"Jul", annualCost:5000, status:"plan", type:"expense" },
-  { id:8, name:"Replacement Aged Hardware", requester:"Melanie", category:"Hardware", priority:"Keep Lights On", startMonth:"Apr", annualCost:133000, status:"plan", type:"expense" },
-  { id:9, name:"FCA Bonus/Merit Pool", requester:"Team", category:"Compensation", priority:"Retention", startMonth:"Jan", annualCost:500000, status:"plan", type:"expense" },
-  { id:10, name:"Crowdstrike Active Monitoring", requester:"Rizzo", category:"Security", priority:"Keep Lights On", startMonth:"Jan", annualCost:44000, status:"plan", type:"expense" },
-  { id:11, name:"3rd Party Security Scanning", requester:"Rizzo", category:"Security", priority:"Keep Lights On", startMonth:"Jul", annualCost:50000, status:"plan", type:"expense" },
-  { id:12, name:"Tech Team Training", requester:"Rizzo", category:"Training", priority:"Keep Lights On", startMonth:"May", annualCost:30000, status:"plan", type:"expense" },
-  { id:13, name:"QA Analyst", requester:"Rizzo", category:"Headcount", priority:"Revenue Growth", startMonth:"Jul", annualCost:40000, status:"plan", type:"expense" },
-  { id:14, name:"QA Automation", requester:"Rizzo", category:"Software", priority:"Revenue Growth", startMonth:"Jan", annualCost:18000, status:"plan", type:"expense" },
-  { id:15, name:"Secure Legacy Backup System", requester:"Rizzo", category:"Security", priority:"Keep Lights On", startMonth:"Jan", annualCost:75000, status:"plan", type:"expense" },
-  { id:16, name:"Fractional CISO", requester:"Rizzo", category:"Headcount", priority:"Security", startMonth:"Jan", annualCost:120000, status:"plan", type:"expense" },
-  { id:17, name:"Managed Service Provider (MSP)", requester:"Rizzo", category:"IT Services", priority:"Keep Lights On", startMonth:"Mar", annualCost:108000, status:"plan", type:"expense" },
-  { id:18, name:"CTO", requester:"Reid/Rizzo", category:"Headcount", priority:"Leadership", startMonth:"Jul", annualCost:200000, status:"plan", type:"expense" },
-  { id:19, name:"Claude AI Seats", requester:"Madigan/Rizzo", category:"Software", priority:"Innovation", startMonth:"Mar", annualCost:12800, status:"plan", type:"expense" },
-  { id:20, name:"Memory Blue Extension", requester:"Caitlin", category:"Sales", priority:"Revenue Growth", startMonth:"Jun", annualCost:119000, status:"plan", type:"expense" },
-  { id:21, name:"Director of Product Marketing", requester:"Caitlin", category:"Headcount", priority:"Revenue Growth", startMonth:"TBD", annualCost:200000, status:"unplanned_ask", type:"expense" },
-  { id:22, name:"Technical Operations Manager", requester:"Rizzo", category:"Headcount", priority:"Operations", startMonth:"Apr", annualCost:150000, status:"unplanned_ask", type:"expense" },
-  { id:23, name:"AE Recruitment Fee", requester:"Caitlin", category:"Recruiting", priority:"Revenue Growth", startMonth:"Jun", annualCost:30000, status:"plan", type:"expense" },
-  { id:24, name:"CTO Recruitment Fee", requester:"Rizzo", category:"Recruiting", priority:"Leadership", startMonth:"Jul", annualCost:40000, status:"plan", type:"expense" },
-  { id:25, name:"Marketing Recruiting Fee", requester:"Caitlin", category:"Recruiting", priority:"Revenue Growth", startMonth:"Sep", annualCost:28000, status:"unplanned_ask", type:"expense" },
-];
-
-// ─── Main App ─────────────────────────────────────────────────────────────────
-const ADJ_EBITDA_ADDBACKS = {
-  rows: [
-    { label: "MCSCM Expenses",         v26: [1167,1167,1167,1167,1167,1167,1235,1235,1235,1235,1235,1235] },
-    { label: "MCSCM Payroll",          v26: [52067,51100,53323,53323,53638,57633,57633,57633,57633,57633,57633,57633] },
-    { label: "MCSCM Health Insurance", v26: [10818,10818,11195,12093,12093,11237,11237,11237,11237,11237,11237,11237] },
-  ],
-  total: [64052,63085,65685,66583,66897,70105,70105,70105,70105,70105,70105,70105],
-};
-
-function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides }) {
+// ─── Page: Adj. EBITDA ────────────────────────────────────────────────────────
+function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides, rolledItems }) {
   const C = useC();
-  const [selYear, setSelYear] = useState(2026);
-  
-  const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const sum = arr => arr.reduce((a,b)=>a+(b||0),0);
-  const fmt = (v) => v == null ? "—" : "$" + Math.abs(v).toLocaleString("en-US", {maximumFractionDigits:0});
-  
-  const ebitdaArr = KPIS_ALL["2026"].ebitda;
-  const addbackTotal = ADJ_EBITDA_ADDBACKS.total;
-  const adjEbitdaArr = ebitdaArr.map((v,i) => v + (addbackTotal[i]||0));
-  
-  const rows = [
-    ...ADJ_EBITDA_ADDBACKS.rows,
-    { label: "Total Addback", v26: ADJ_EBITDA_ADDBACKS.total, isTotal: true },
-  ];
-  
-  const headerStyle = { padding: "10px 12px", color: C.textDim, fontWeight: 600, fontSize: 12, textAlign: "right", borderBottom: `1px solid ${C.cardBorder}` };
-  const cellStyle = (isTotal) => ({ padding: "9px 12px", textAlign: "right", color: isTotal ? C.actual : C.text, fontWeight: isTotal ? 700 : 400, fontSize: 12 });
-  
+  const [year, setYear] = useState(2026);
+
+  // Base EBITDA from KPIS_ALL (actual + projected)
+  const baseEbitda = useMemo(() => {
+    const k = KPIS_ALL[String(year)];
+    if (!k) return Array(12).fill(0);
+    return k.ebitda.map((v, i) => {
+      if (isActualMonth(year, i)) return v;
+      // For projected months, recompute from projections
+      const revRows = UNIFIED_PL.map((r, idx) => ({ ...r, _idx: idx })).filter(r => r.type === "revenue" && isLeafGL(r.a));
+      const rev = revRows.reduce((s, r) => s + computeEffective(r._idx, year, i, projOverrides, approvedItems, rolledItems), 0);
+      const expRows = UNIFIED_PL.map((r, idx) => ({ ...r, _idx: idx })).filter(r => r.type === "expense" && isLeafGL(r.a));
+      const exp = expRows.reduce((s, r) => s + computeEffective(r._idx, year, i, projOverrides, approvedItems, rolledItems), 0);
+      const cogsRows = UNIFIED_PL.map((r, idx) => ({ ...r, _idx: idx })).filter(r => r.type === "cogs" && isLeafGL(r.a));
+      const cogs = cogsRows.reduce((s, r) => s + computeEffective(r._idx, year, i, projOverrides, approvedItems, rolledItems), 0);
+      const daRow = UNIFIED_PL.find(r => r.a === "Total Other Expenses" || r.a.includes("Depreciation"));
+      const da = daRow ? (getRowData(daRow, year)?.[i] ?? PLAN_2026.da[i] ?? 0) : (PLAN_2026.da[i] ?? 0);
+      return (rev - cogs - exp) + da;
+    });
+  }, [year, projOverrides, approvedItems, rolledItems]);
+
+  // Adj items: scenario items that affect EBITDA + manual overrides
+  const adjItems = useMemo(() => {
+    const items = [];
+    (approvedItems || []).forEach(item => {
+      if (item.glCode) {
+        items.push({
+          id: item.id, label: item.name, glCode: item.glCode,
+          annualCost: item.annualCost || 0, startYear: item.startYear, endYear: item.endYear,
+          startMonth: item.startMonth, endMonth: item.endMonth, source: "scenario",
+        });
+      }
+    });
+    return items;
+  }, [approvedItems]);
+
+  const getMonthlyAdj = (item, yr, m) => {
+    const sy = parseInt(item.startYear) || 2026;
+    const sm = MONTHS.indexOf(item.startMonth || "Jan");
+    const ey = parseInt(item.endYear) || 2028;
+    const em = MONTHS.indexOf(item.endMonth || "Dec");
+    const inRange = (yr > sy || (yr === sy && m >= sm)) && (yr < ey || (yr === ey && m <= em));
+    return inRange ? (item.annualCost || 0) / 12 : 0;
+  };
+
+  const monthlyAdj = useMemo(() => Array.from({ length: 12 }, (_, m) =>
+    adjItems.reduce((s, item) => s + getMonthlyAdj(item, year, m), 0)
+  ), [adjItems, year]);
+
+  const adjEbitda = baseEbitda.map((v, i) => v - monthlyAdj[i]);
+  const totalBase = baseEbitda.reduce((s, v) => s + v, 0);
+  const totalAdj = adjEbitda.reduce((s, v) => s + v, 0);
+  const totalAdjItems = monthlyAdj.reduce((s, v) => s + v, 0);
+  const planEbitda = year === 2026 ? PLAN_2026.rev.map((r, i) => r - PLAN_2026.cogs[i] - PLAN_2026.exp[i] + PLAN_2026.da[i]) : null;
+
+  const chartData = MONTHS.map((m, i) => ({
+    month: m,
+    "Base EBITDA": Math.round(baseEbitda[i]),
+    "Adj. EBITDA": Math.round(adjEbitda[i]),
+    Plan: planEbitda ? Math.round(planEbitda[i]) : null,
+    isActual: isActualMonth(year, i),
+  }));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Adjusted EBITDA</h2>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {YEARS.map(yr => (
+            <button key={yr} onClick={() => setYear(yr)}
+              style={{ padding: "6px 16px", borderRadius: 8, border: `1px solid ${year === yr ? C.accent : C.cardBorder}`,
+                background: year === yr ? C.accent : "transparent", color: C.actual, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              {yr}
+            </button>
+          ))}
+        </div>
       </div>
-      
+
+      {/* KPI Row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         {[
-          { label: "EBITDA", value: sum(ebitdaArr) },
-          { label: "Total Addbacks", value: sum(addbackTotal) },
-          { label: "Adjusted EBITDA", value: sum(adjEbitdaArr) },
-        ].map(({ label, value }) => (
-          <Card key={label} style={{ padding: 20, textAlign: "center" }}>
-            <div style={{ color: C.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>{label}</div>
-            <div style={{ color: C.actual, fontSize: 24, fontWeight: 700 }}>{fmt(value)}</div>
+          { label: "Base EBITDA", value: totalBase, sub: `FY ${year}` },
+          { label: "Total Adj Items", value: -totalAdjItems, sub: `${adjItems.length} scenario items`, neg: true },
+          { label: "Adj. EBITDA", value: totalAdj, sub: "After adjustments", highlight: true },
+        ].map((k, i) => (
+          <Card key={i} style={{ padding: 16, textAlign: "center" }}>
+            <div style={{ color: C.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{k.label}</div>
+            <div style={{ color: k.highlight ? C.accent : k.neg ? C.negative : C.actual, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
+              {fmt(k.value, true)}
+            </div>
+            <div style={{ color: C.textDim, fontSize: 11 }}>{k.sub}</div>
           </Card>
         ))}
       </div>
-      
+
+      {/* Chart */}
       <Card>
-        <h3 style={{ color: C.actual, margin: "0 0 16px", fontSize: 15 }}>EBITDA Addback Detail – 2026</h3>
+        <div style={{ color: C.actual, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>EBITDA Trend</div>
+        <ResponsiveContainer width="100%" height={260}>
+          <ComposedChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.cardBorder} opacity={0.5} />
+            <XAxis dataKey="month" tick={{ fill: C.textDim, fontSize: 11 }} />
+            <YAxis tickFormatter={v => fmt(v, true)} tick={{ fill: C.textDim, fontSize: 11 }} />
+            <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, color: C.actual }}
+              formatter={(v, n) => [fmt(v), n]} />
+            <Bar dataKey="Base EBITDA" fill={C.accent} opacity={0.5} maxBarSize={28} radius={[3,3,0,0]} />
+            <Line dataKey="Adj. EBITDA" stroke={C.accent} strokeWidth={2} dot={{ r: 3, fill: C.accent }} />
+            {year === 2026 && <Line dataKey="Plan" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3, fill: "#f59e0b" }} />}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </Card>
+
+      {/* Adj Items Table */}
+      <Card>
+        <div style={{ color: C.actual, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>
+          Adjustment Items
+          {adjItems.length === 0 && <span style={{ color: C.textDim, fontSize: 12, fontWeight: 400, marginLeft: 8 }}>No approved scenario items — approve items in Scenarios to see adjustments here.</span>}
+        </div>
+        {adjItems.length > 0 && (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: C.headerBg }}>
+                {["Item", "GL Code", "Annual Cost", "Active Period", "Source"].map(h => (
+                  <th key={h} style={{ padding: "8px 12px", color: C.textDim, fontWeight: 600, textAlign: h === "Annual Cost" ? "right" : "left", borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {adjItems.map((item, i) => (
+                <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: i % 2 === 0 ? "transparent" : `${C.cardBorder}22` }}>
+                  <td style={{ padding: "8px 12px", color: C.actual }}>{item.label}</td>
+                  <td style={{ padding: "8px 12px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode}</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: C.negative, fontWeight: 600 }}>{fmt(item.annualCost)}/yr</td>
+                  <td style={{ padding: "8px 12px", color: C.textDim }}>{item.startMonth} {item.startYear} – {item.endMonth} {item.endYear}</td>
+                  <td style={{ padding: "8px 12px" }}>
+                    <span style={{ background: `${C.accent}22`, color: C.accent, border: `1px solid ${C.accent}44`, borderRadius: 4, padding: "2px 7px", fontSize: 10, fontWeight: 600 }}>
+                      {item.source}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      {/* Monthly Detail */}
+      <Card>
+        <div style={{ color: C.actual, fontWeight: 600, fontSize: 15, marginBottom: 12 }}>Monthly Detail</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: C.headerBg }}>
-                <th style={{ ...headerStyle, textAlign: "left" }}>Item</th>
-                {MONTHS_SHORT.map(m => <th key={m} style={headerStyle}>{m}</th>)}
-                <th style={{ ...headerStyle, color: C.actual }}>Total</th>
+                {["Month", "Base EBITDA", "Adj Items", "Adj. EBITDA", year === 2026 ? "Plan" : null, "Margin"].filter(Boolean).map(h => (
+                  <th key={h} style={{ padding: "8px 12px", color: C.textDim, fontWeight: 600, textAlign: h === "Month" ? "left" : "right", borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ label, v26, isTotal }) => (
-                <tr key={label} style={{ borderBottom: `1px solid ${C.cardBorder}22`, background: isTotal ? C.totalBg : "transparent" }}>
-                  <td style={{ padding: "9px 12px", color: isTotal ? C.actual : C.text, fontWeight: isTotal ? 700 : 400, fontSize: 12 }}>{label}</td>
-                  {v26.map((v,i) => <td key={i} style={cellStyle(isTotal)}>{fmt(v)}</td>)}
-                  <td style={cellStyle(isTotal)}>{fmt(sum(v26))}</td>
-                </tr>
-              ))}
-              <tr style={{ borderBottom: `1px solid ${C.cardBorder}`, background: "transparent" }}>
-                <td style={{ padding: "9px 12px", color: C.textDim, fontSize: 12 }}>EBITDA</td>
-                {ebitdaArr.map((v,i) => <td key={i} style={{ padding: "9px 12px", textAlign: "right", color: C.textDim, fontSize: 12 }}>{fmt(v)}</td>)}
-                <td style={{ padding: "9px 12px", textAlign: "right", color: C.textDim, fontSize: 12 }}>{fmt(sum(ebitdaArr))}</td>
-              </tr>
-              <tr style={{ background: C.totalBg }}>
-                <td style={{ padding: "10px 12px", color: C.accent, fontWeight: 700, fontSize: 13 }}>Adjusted EBITDA</td>
-                {adjEbitdaArr.map((v,i) => <td key={i} style={{ padding: "10px 12px", textAlign: "right", color: C.actual, fontWeight: 700, fontSize: 12 }}>{fmt(v)}</td>)}
-                <td style={{ padding: "10px 12px", textAlign: "right", color: C.actual, fontWeight: 700, fontSize: 13 }}>{fmt(sum(adjEbitdaArr))}</td>
+              {MONTHS.map((m, i) => {
+                const k = KPIS_ALL[String(year)];
+                const rev = k ? k.rev[i] : 0;
+                const margin = rev ? adjEbitda[i] / rev : 0;
+                const isActual = isActualMonth(year, i);
+                return (
+                  <tr key={m} style={{ background: i % 2 === 0 ? "transparent" : `${C.cardBorder}22`, borderBottom: `1px solid ${C.cardBorder}33` }}>
+                    <td style={{ padding: "8px 12px", color: C.actual, fontWeight: isActual ? 600 : 400 }}>{m}{isActual ? " 🔒" : ""}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{fmt(baseEbitda[i])}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: monthlyAdj[i] > 0 ? C.negative : C.textDim }}>
+                      {monthlyAdj[i] > 0 ? `-${fmt(monthlyAdj[i])}` : "—"}
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: adjEbitda[i] >= 0 ? C.actual : C.negative, fontWeight: 600 }}>{fmt(adjEbitda[i])}</td>
+                    {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{planEbitda ? fmt(planEbitda[i]) : "—"}</td>}
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: margin >= 0.15 ? C.positive : margin >= 0 ? C.actual : C.negative }}>
+                      {(margin * 100).toFixed(1)}%
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr style={{ background: C.totalBg, fontWeight: 700, borderTop: `2px solid ${C.cardBorder}` }}>
+                <td style={{ padding: "8px 12px", color: C.actual }}>Full Year</td>
+                <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{fmt(totalBase)}</td>
+                <td style={{ padding: "8px 12px", textAlign: "right", color: totalAdjItems > 0 ? C.negative : C.textDim }}>
+                  {totalAdjItems > 0 ? `-${fmt(totalAdjItems)}` : "—"}
+                </td>
+                <td style={{ padding: "8px 12px", textAlign: "right", color: totalAdj >= 0 ? C.actual : C.negative, fontWeight: 700 }}>{fmt(totalAdj)}</td>
+                {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{planEbitda ? fmt(planEbitda.reduce((s,v)=>s+v,0)) : "—"}</td>}
+                <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                  {(() => { const k = KPIS_ALL[String(year)]; const rev = k ? k.rev.reduce((s,v)=>s+v,0) : 0; const m = rev ? totalAdj/rev : 0; return <span style={{ color: m>=0.15?C.positive:m>=0?C.actual:C.negative }}>{(m*100).toFixed(1)}%</span>; })()}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -2195,29 +2571,38 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
   );
 }
 
+// ─── Wish List constant (default data) ────────────────────────────────────────
+const WISH_LIST = [
+  { id: 1, name: "Salesforce CRM", glCode: "605100 Software", requester: "Sales", annualCost: 36000, startMonth: "Jan", startYear: "2026", endMonth: "Dec", endYear: "2028", status: "plan", notes: "Pipeline tracking" },
+  { id: 2, name: "Security Camera Upgrade", glCode: "803100 Equipment Sales", requester: "Operations", annualCost: 24000, startMonth: "Jun", startYear: "2026", endMonth: "Dec", endYear: "2027", status: "wish", notes: "Facility upgrade" },
+  { id: 3, name: "HR Platform (BambooHR)", glCode: "605100 Software", requester: "HR", annualCost: 18000, startMonth: "Mar", startYear: "2026", endMonth: "Dec", endYear: "2028", status: "plan", notes: "Headcount mgmt" },
+];
+
+// ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState("dashboard");
-  const [fontSize, setFontSize] = useState("md");
   const [darkMode, setDarkMode] = useState(true);
-  const C = darkMode ? DARK_THEME : LIGHT_THEME;
+  const [fontSize, setFontSize] = useState("md");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [wishListItems, setWishListItems] = useState(WISH_LIST);
-  const [approvedItemIds, setApprovedItemIds] = useState(new Set());
-  const approvedItems = wishListItems.filter(w => approvedItemIds.has(w.id));
+  const [page, setPage] = useState("dashboard");
   const [projOverrides, setProjOverrides] = useState({});
   const [adjOverrides, setAdjOverrides] = useState({});
+  const [wishListItems, setWishListItems] = useState(WISH_LIST);
+  const [approvedItemIds, setApprovedItemIds] = useState(new Set(WISH_LIST.filter(w => w.status === "plan").map(w => w.id)));
   const [rolledItems, setRolledItems] = useState([]);
 
-  const handleNav = useCallback((p) => setPage(p), []);
+  const C = darkMode ? DARK_THEME : LIGHT_THEME;
+  const approvedItems = wishListItems.filter(w => approvedItemIds.has(w.id));
+  const handleNav = (id) => setPage(id);
 
   const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "fullpl", label: "Full P&L", icon: TableProperties },
-    { id: "projections", label: "Projections", icon: TrendingUp },
-    { id: "avb-summary", label: "Actuals vs Budget", icon: BarChart2, sub: "Summary" },
-    { id: "avb-detail", label: "Actuals vs Budget", icon: BarChart2, sub: "Detail" },
-    { id: "scenarios", label: "Scenarios", icon: Sliders },
-    { id: "adj-ebitda", label: "Adj. EBITDA", icon: TrendingUp },
+    { id: "dashboard",   label: "Dashboard",          icon: LayoutDashboard },
+    { id: "rev-vs-plan", label: "Revenue vs Plan",     icon: TrendingUp },
+    { id: "avb-summary", label: "Actuals vs Budget",   icon: BarChart2, sub: "Summary" },
+    { id: "avb-detail",  label: "Actuals vs Budget",   icon: BarChart2, sub: "Detail" },
+    { id: "fullpl",      label: "Full P&L",            icon: TableProperties },
+    { id: "projections", label: "Projections",         icon: TrendingUp },
+    { id: "scenarios",   label: "Scenarios",           icon: Sliders },
+    { id: "adj-ebitda",  label: "Adj. EBITDA",         icon: TrendingUp },
   ];
 
   return (
@@ -2235,31 +2620,28 @@ export default function App() {
       {/* Sidebar */}
       <aside style={{ width: sidebarOpen ? 220 : 56, background: C.card, borderRight: `1px solid ${C.cardBorder}`,
         flexShrink: 0, display: "flex", flexDirection: "column", transition: "width 0.2s" }}>
-        {/* Logo */}
-        <div style={{ padding: "20px 16px", display: "flex", alignItems: "center", gap: 12, borderBottom: `1px solid ${C.cardBorder}` }}>
-          <FCALogo size={36} />
-          {sidebarOpen && (
-            <div>
-              <div style={{ color: C.actual, fontWeight: 800, fontSize: 13, lineHeight: 1.1 }}>Field Control<br />Analytics</div>
-              <div style={{ color: C.projection, fontSize: 9, marginTop: 2, letterSpacing: 1 }}>FP&A TOOL</div>
-            </div>
-          )}
+
+        {/* Logo + toggle */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 12px", borderBottom: `1px solid ${C.cardBorder}` }}>
+          <FCALogo size={32} />
+          {sidebarOpen && <span style={{ color: C.actual, fontWeight: 700, fontSize: 14, letterSpacing: 0.3 }}>FCA FP&amp;A</span>}
+          <button onClick={() => setSidebarOpen(o => !o)} style={{ marginLeft: "auto", background: "none", border: "none", color: C.textDim, cursor: "pointer", padding: 4 }}>
+            {sidebarOpen ? <ChevronDown size={16} style={{ transform: "rotate(90deg)" }} /> : <ChevronRight size={16} />}
+          </button>
         </div>
-        {/* Nav */}
-        <nav style={{ flex: 1, padding: "12px 8px" }}>
+
+        {/* Nav items */}
+        <nav style={{ flex: 1, padding: "8px 6px", overflowY: "auto" }}>
           {navItems.map(({ id, label, icon: Icon, sub }) => (
-            <button key={id + (sub || "")}
-              onClick={() => handleNav(id)}
-              style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8,
+            <button key={id} onClick={() => handleNav(id)}
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 8,
                 background: page === id ? `${C.accent}33` : "transparent",
                 border: `1px solid ${page === id ? C.accent + "55" : "transparent"}`,
                 color: page === id ? C.actual : C.textDim, cursor: "pointer", marginBottom: 2,
-                textAlign: "left", transition: "all 0.15s" }}
-              onMouseEnter={e => page !== id && (e.currentTarget.style.background = "#1e3a6e33")}
-              onMouseLeave={e => page !== id && (e.currentTarget.style.background = "transparent")}>
-              <Icon size={16} style={{ flexShrink: 0 }} />
+                textAlign: "left", transition: "background 0.15s" }}>
+              <Icon size={17} style={{ flexShrink: 0, color: page === id ? C.accent : C.textDim }} />
               {sidebarOpen && (
-                <div>
+                <div style={{ overflow: "hidden" }}>
                   <div style={{ fontSize: 12, fontWeight: page === id ? 600 : 400 }}>{label}</div>
                   {sub && <div style={{ fontSize: 10, color: C.textDim, marginTop: 1 }}>{sub}</div>}
                 </div>
@@ -2267,47 +2649,47 @@ export default function App() {
             </button>
           ))}
         </nav>
-        {/* Toggle sidebar */}
-        <button onClick={() => setSidebarOpen(o => !o)}
-          style={{ padding: "12px 16px", background: "none", border: "none", color: C.muted, cursor: "pointer",
-            borderTop: `1px solid ${C.cardBorder}`, textAlign: sidebarOpen ? "right" : "center" }}>
-          {sidebarOpen ? "◀" : "▶"}
-        </button>
-      </aside>
 
-      {/* Main Content */}
-      <main style={{ flex: 1, overflowY: "auto", padding: "24px 28px" }}>
-        {/* Header bar */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-          marginBottom: 24, paddingBottom: 16, borderBottom: `1px solid ${C.cardBorder}33` }}>
-          <div>
-            <div style={{ color: C.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>Field Control Analytics</div>
-            <h1 style={{ color: C.actual, margin: 0, fontSize: 18, fontWeight: 700 }}>
-              {navItems.find(n => n.id === page)?.label || "FP&A Tool"}
-            </h1>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              {["sm","md","lg"].map((sz, idx) => (
-                <button key={sz} onClick={() => setFontSize(sz)}
-                  style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${fontSize === sz ? C.accent : C.cardBorder}`,
-                    background: fontSize === sz ? C.accent : "transparent", color: C.actual, cursor: "pointer",
-                    fontSize: 11, fontWeight: 600 }}>
-                  {["S","M","L"][idx]}
+        {/* Bottom controls */}
+        <div style={{ padding: "10px 8px", borderTop: `1px solid ${C.cardBorder}`, display: "flex", flexDirection: "column", gap: 6 }}>
+          {/* Font size */}
+          {sidebarOpen && (
+            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              {["sm","md","lg"].map(s => (
+                <button key={s} onClick={() => setFontSize(s)}
+                  style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${fontSize===s?C.accent:C.cardBorder}`,
+                    background: fontSize===s?C.accent:"transparent", color: C.actual, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                  {s.toUpperCase()}
                 </button>
               ))}
             </div>
-            <button onClick={() => setDarkMode(d => !d)} style={{ background: "transparent", border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "4px 10px", color: C.text, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-                {darkMode ? <Sun size={13} /> : <Moon size={13} />}
-                {darkMode ? "Light" : "Dark"}
-              </button>
-            <Badge color={C.positive}>Actuals through May 2026</Badge>
+          )}
+          {/* Dark/Light toggle */}
+          <button onClick={() => setDarkMode(d => !d)}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 8,
+              border: `1px solid ${C.cardBorder}`, background: "transparent", color: C.textDim, cursor: "pointer" }}>
+            {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+            {sidebarOpen && <span style={{ fontSize: 12 }}>{darkMode ? "Light Mode" : "Dark Mode"}</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <main style={{ flex: 1, padding: "24px 28px", overflowY: "auto", minWidth: 0 }}>
+        {/* Top bar */}
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 20, gap: 12 }}>
+          <div>
+            <div style={{ color: C.actual, fontWeight: 700, fontSize: 16 }}>
+              {navItems.find(n => n.id === page)?.label || ""}
+              {navItems.find(n => n.id === page)?.sub ? ` — ${navItems.find(n => n.id === page).sub}` : ""}
+            </div>
             <div style={{ color: C.textDim, fontSize: 11 }}>FY 2026–2028</div>
           </div>
         </div>
 
         {/* Page content */}
         {page === "dashboard" && <Dashboard onNav={handleNav} />}
+        {page === "rev-vs-plan" && <RevVsPlan projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "fullpl" && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} rolledItems={rolledItems} />}
         {page === "projections" && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-summary" && <AvBSummary />}
