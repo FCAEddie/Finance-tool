@@ -68,7 +68,7 @@ const isInPeriod = (item, year, monthIdx) => {
   return cur >= sy * 12 + sm && cur <= ey * 12 + em;
 };
 
-const getLeafEffective = (row, year, monthIdx, projOverrides, approvedItems) => {
+const getLeafEffective = (row, year, monthIdx, projOverrides, approvedItems, rolledItems) => {
   if (isActualMonth(year, monthIdx)) return getRowData(row, year)?.[monthIdx] ?? 0;
   const base = getRowData(row, year)?.[monthIdx] ?? 0;
   const key = `${year}_${monthIdx}`;
@@ -76,14 +76,17 @@ const getLeafEffective = (row, year, monthIdx, projOverrides, approvedItems) => 
   const scenarioAdd = (approvedItems || [])
     .filter(item => item.glCode === row.a && isInPeriod(item, year, monthIdx))
     .reduce((s, item) => s + ((item.annualCost || 0) / 12), 0);
-  return (override !== undefined ? override : base) + scenarioAdd;
+  const rolledAdd = (rolledItems || [])
+    .filter(item => item.glCode === row.a && isInPeriod(item, year, monthIdx))
+    .reduce((s, item) => s + ((item.annualCost || 0) / 12), 0);
+  return (override !== undefined ? override : base) + scenarioAdd + rolledAdd;
 };
 
-const computeEffective = (rowIdx, year, monthIdx, projOverrides, approvedItems) => {
+const computeEffective = (rowIdx, year, monthIdx, projOverrides, approvedItems, rolledItems) => {
   const row = UNIFIED_PL[rowIdx];
   if (!row) return 0;
   if (isActualMonth(year, monthIdx)) return getRowData(row, year)?.[monthIdx] ?? 0;
-  if (isLeafGL(row.a)) return getLeafEffective(row, year, monthIdx, projOverrides, approvedItems);
+  if (isLeafGL(row.a)) return getLeafEffective(row, year, monthIdx, projOverrides, approvedItems, rolledItems);
   // Find direct children
   const children = [];
   for (let ci = rowIdx + 1; ci < UNIFIED_PL.length; ci++) {
@@ -91,7 +94,7 @@ const computeEffective = (rowIdx, year, monthIdx, projOverrides, approvedItems) 
     if (UNIFIED_PL[ci].i === row.i + 1) children.push(ci);
   }
   if (children.length > 0) {
-    return children.reduce((s, ci) => s + computeEffective(ci, year, monthIdx, projOverrides, approvedItems), 0);
+    return children.reduce((s, ci) => s + computeEffective(ci, year, monthIdx, projOverrides, approvedItems, rolledItems), 0);
   }
   return getRowData(row, year)?.[monthIdx] ?? 0;
 };
@@ -496,12 +499,37 @@ function Dashboard({ onNav }) {
 }
 
 // ─── Page: Full P&L ───────────────────────────────────────────────────────────
-function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
+function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledItems }) {
   const C = useC();
   const [year, setYear] = useState(2026);
   const [expanded, setExpanded] = useState(new Set(["Income","Expenses","Cost of Goods Sold"]));
   const [modal, setModal] = useState(null);
   const [editingCell, setEditingCell] = useState(null);
+  const [rollForwardPrompt, setRollForwardPrompt] = useState(null);
+
+  const applyRollForward = (scope) => {
+    if (!rollForwardPrompt) return;
+    const { rowA, year: rfYear, monthIdx, value } = rollForwardPrompt;
+    setProjOverrides(prev => {
+      const updated = { ...prev, [rowA]: { ...(prev[rowA] || {}) } };
+      if (scope === "month") {
+        if (!isActualMonth(rfYear, monthIdx)) updated[rowA][`${rfYear}_${monthIdx}`] = value;
+      }
+      if (scope === "year" || scope === "all") {
+        for (let m = monthIdx; m < 12; m++) {
+          if (!isActualMonth(rfYear, m)) updated[rowA][`${rfYear}_${m}`] = value;
+        }
+      }
+      if (scope === "all") {
+        for (const futureYear of [2027, 2028]) {
+          for (let m = 0; m < 12; m++) {
+            updated[rowA][`${futureYear}_${m}`] = value;
+          }
+        }
+      }
+      return updated;
+    });
+  };
 
   const toggle = (a) => setExpanded(prev => {
     const next = new Set(prev);
@@ -540,10 +568,8 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
 
   const handleCellClick = (row, monthIdx) => {
     if (isActualMonth(year, monthIdx)) {
-      const txs = TRANSACTIONS.filter(t => t.g === row.a && t.m === monthIdx);
-      if (txs.length > 0) {
-        setModal({ type: "transactions", row, month: monthIdx, year, txs });
-      }
+      const txs = TRANSACTIONS.filter(t => t.g === row.a && t.m === monthIdx).sort((a,b) => b.a - a.a);
+      setModal({ type: "transactions", row, month: monthIdx, year, txs });
     } else {
       const base = row._idx ?? UNIFIED_PL.findIndex(r => r.a === row.a);
       const children = [];
@@ -551,10 +577,14 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
         if (UNIFIED_PL[ci].i <= UNIFIED_PL[base].i) break;
         children.push(UNIFIED_PL[ci]);
       }
+      const approvedMatches = (approvedItems || []).filter(item => item.glCode === row.a && isInPeriod(item, year, monthIdx));
+      const rolledMatches = (rolledItems || []).filter(item => item.glCode === row.a && isInPeriod(item, year, monthIdx));
+      const baseVal = getRowData(row, year)?.[monthIdx] ?? 0;
+      const overrideVal = projOverrides?.[row.a]?.[`${year}_${monthIdx}`];
       if (children.length > 0) {
-        setModal({ type: "breakdown", row, month: monthIdx, year, children });
+        setModal({ type: "breakdown", row, month: monthIdx, year, children, approvedMatches, rolledMatches });
       } else {
-        setModal({ type: "projection", row, month: monthIdx, year });
+        setModal({ type: "projection", row, month: monthIdx, year, baseVal, overrideVal, approvedMatches, rolledMatches });
       }
     }
   };
@@ -639,7 +669,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
                     {MONTHS.map((_, mi) => {
                       const isAct = isActualMonth(year, mi);
                       const rowIdx = row._idx ?? UNIFIED_PL.findIndex(r => r.a === row.a);
-                      const effVal = computeEffective(rowIdx, year, mi, projOverrides, approvedItems);
+                      const effVal = computeEffective(rowIdx, year, mi, projOverrides, approvedItems, rolledItems);
                       const isLeaf = isLeafGL(row.a);
                       const isEditing = editingCell?.rowA === row.a && editingCell?.year === year && editingCell?.monthIdx === mi;
                       const hasOverride = !isAct && isLeaf && projOverrides?.[row.a]?.[`${year}_${mi}`] !== undefined;
@@ -663,6 +693,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
                                 const newVal = parseFloat(e.target.value);
                                 if (!isNaN(newVal)) {
                                   setProjOverrides(prev => ({ ...prev, [row.a]: { ...(prev[row.a] || {}), [`${year}_${mi}`]: newVal } }));
+                                  setRollForwardPrompt({ rowA: row.a, year, monthIdx: mi, value: newVal });
                                 }
                                 setEditingCell(null);
                               }}
@@ -684,7 +715,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
                     <td style={{ textAlign: "right", padding: "7px 8px", color: isTot ? C.actual : C.textDim, fontWeight: isTot ? 700 : 400 }}>
                       {(() => {
                         const rowIdx2 = row._idx ?? UNIFIED_PL.findIndex(r => r.a === row.a);
-                        const total = MONTHS.reduce((s, _, mi) => s + computeEffective(rowIdx2, year, mi, projOverrides, approvedItems), 0);
+                        const total = MONTHS.reduce((s, _, mi) => s + computeEffective(rowIdx2, year, mi, projOverrides, approvedItems, rolledItems), 0);
                         return total ? fmt(total, true) : "—";
                       })()}
                     </td>
@@ -696,85 +727,159 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
         </div>
       </Card>
 
+      {/* Roll Forward Prompt */}
+      {rollForwardPrompt && (
+        <div style={{ position: "fixed", bottom: 20, right: 20, background: C.card, border: `1px solid ${C.accent}`, borderRadius: 10, padding: 16, zIndex: 1000, boxShadow: "0 4px 20px rgba(0,0,0,0.3)", maxWidth: 320 }}>
+          <div style={{ color: C.actual, fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
+            Apply {fmt(rollForwardPrompt.value)} to future months?
+          </div>
+          <div style={{ color: C.textDim, fontSize: 11, marginBottom: 10 }}>
+            {rollForwardPrompt.rowA} — {MONTHS[rollForwardPrompt.monthIdx]} {rollForwardPrompt.year}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => { applyRollForward("month"); setRollForwardPrompt(null); }}
+              style={{ padding: "5px 10px", borderRadius: 6, background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", color: "#60a5fa", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
+              This month only
+            </button>
+            <button onClick={() => { applyRollForward("year"); setRollForwardPrompt(null); }}
+              style={{ padding: "5px 10px", borderRadius: 6, background: C.accent, border: "none", color: "white", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
+              Remaining {rollForwardPrompt.year}
+            </button>
+            <button onClick={() => { applyRollForward("all"); setRollForwardPrompt(null); }}
+              style={{ padding: "5px 10px", borderRadius: 6, background: "#7c3aed", border: "none", color: "white", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
+              All future years
+            </button>
+          </div>
+          <button onClick={() => setRollForwardPrompt(null)} style={{ marginTop: 8, fontSize: 11, color: C.textDim, background: "none", border: "none", cursor: "pointer" }}>Dismiss</button>
+        </div>
+      )}
+
       {/* Modals */}
       {modal?.type === "projection" && (() => {
-        const cat = getCategoryForGL(modal.row.a);
-        const relatedItems = (approvedItems || []).filter(w =>
-          cat && w.category && w.category.toLowerCase() === cat.toLowerCase()
-        );
+        const { row, month, year: mYear, baseVal, overrideVal, approvedMatches: am, rolledMatches: rm } = modal;
+        const scenarioAdd = (am || []).reduce((s, item) => s + ((item.annualCost || 0) / 12), 0);
+        const rolledAdd = (rm || []).reduce((s, item) => s + ((item.annualCost || 0) / 12), 0);
+        const effectiveBase = overrideVal !== undefined ? overrideVal : (baseVal || 0);
+        const totalEffective = effectiveBase + scenarioAdd + rolledAdd;
         return (
-        <Modal title={`Projection Detail – ${modal.row.a} – ${MONTHS[modal.month]} ${modal.year}`} onClose={() => setModal(null)}>
-          <div style={{ color: C.textDim, fontSize: 13, marginBottom: 16 }}>
-            <TrendingUp size={14} style={{ verticalAlign: "middle", marginRight: 6, color: C.projection }} />
-            Projected value for <strong style={{ color: C.actual }}>{modal.row.a}</strong>
-          </div>
-          <div style={{ background: C.bg, borderRadius: 8, padding: 16, marginBottom: 16 }}>
-            <div style={{ color: C.projection, fontWeight: 700, fontSize: 24 }}>
-              {fmt(getRowData(modal.row, modal.year)?.[modal.month])}
-            </div>
-            <div style={{ color: C.textDim, fontSize: 12, marginTop: 4 }}>Projected {MONTHS[modal.month]} {modal.year}</div>
-          </div>
-          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
-                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Month</th>
-                <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>2026 Plan</th>
-                <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>2027 Proj</th>
-                <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>2028 Proj</th>
-              </tr>
-            </thead>
-            <tbody>
-              {MONTHS.map((m, i) => (
-                <tr key={m} style={{ background: i === modal.month ? "#1e3a6e55" : "transparent", borderBottom: `1px solid ${C.cardBorder}22` }}>
-                  <td style={{ padding: "6px 8px", color: i === modal.month ? C.actual : C.textDim }}>{m}</td>
-                  <td style={{ textAlign: "right", padding: "6px 8px", color: C.projection }}>{fmt(modal.row.v26?.[i], true)}</td>
-                  <td style={{ textAlign: "right", padding: "6px 8px", color: C.projection }}>{fmt(modal.row.v27?.[i], true)}</td>
-                  <td style={{ textAlign: "right", padding: "6px 8px", color: C.projection }}>{fmt(modal.row.v28?.[i], true)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {relatedItems.length > 0 && (
-            <div style={{ marginTop: 16, padding: 12, background: "#1e3a6e33", borderRadius: 8, border: `1px solid ${C.accent}44` }}>
-              <div style={{ color: C.actual, fontWeight: 600, fontSize: 12, marginBottom: 8 }}>
-                Approved Scenario Items ({cat})
+        <Modal title={`Projection — ${row.a} — ${MONTHS[month]} ${mYear}`} onClose={() => setModal(null)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Base Value */}
+            <div style={{ background: C.bg, borderRadius: 8, padding: "10px 14px" }}>
+              <div style={{ color: C.textDim, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>BASE VALUE (2026 PLAN)</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ color: C.textDim, fontSize: 12 }}>Base ({MONTHS[month]} {mYear} plan):</span>
+                <span style={{ color: C.projection, fontWeight: 700, fontSize: 15 }}>{fmt(baseVal || 0)}</span>
               </div>
-              {relatedItems.map(item => (
-                <div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0",
-                  borderBottom: `1px solid ${C.cardBorder}22`, fontSize: 12 }}>
-                  <span style={{ color: C.text }}>{item.name}</span>
-                  <span style={{ color: C.projection, fontWeight: 600 }}>{fmt(item.annualCost)}/yr</span>
-                </div>
-              ))}
             </div>
-          )}
-          <button onClick={() => { setModal(null); onNav("projections"); }}
-            style={{ marginTop: 16, padding: "8px 16px", borderRadius: 8, background: C.accent, border: "none", color: "white", cursor: "pointer", fontSize: 13 }}>
-            <Pencil size={13} style={{ verticalAlign: "middle", marginRight: 6 }} />Edit Projections
-          </button>
+            {/* Override */}
+            {overrideVal !== undefined && (
+              <div style={{ background: "rgba(245,158,11,0.1)", borderRadius: 8, padding: "10px 14px", border: "1px solid rgba(245,158,11,0.3)" }}>
+                <div style={{ color: "#f59e0b", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>MANUAL OVERRIDE</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ color: C.textDim, fontSize: 12 }}>User-set override:</span>
+                  <span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 15 }}>{fmt(overrideVal)} <span style={{ fontSize: 10, fontWeight: 400 }}>← overrides base</span></span>
+                </div>
+              </div>
+            )}
+            {/* Approved Scenario Items */}
+            {am && am.length > 0 && (
+              <div style={{ background: "rgba(34,197,94,0.08)", borderRadius: 8, padding: "10px 14px", border: "1px solid rgba(34,197,94,0.25)" }}>
+                <div style={{ color: "#4ade80", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>APPROVED SCENARIO ITEMS</div>
+                <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.cardBorder}33` }}>
+                      <th style={{ textAlign: "left", padding: "4px 6px", color: C.textDim, fontWeight: 500 }}>Name</th>
+                      <th style={{ textAlign: "right", padding: "4px 6px", color: C.textDim, fontWeight: 500 }}>Monthly</th>
+                      <th style={{ textAlign: "left", padding: "4px 6px", color: C.textDim, fontWeight: 500 }}>Active</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {am.map(item => (
+                      <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
+                        <td style={{ padding: "4px 6px", color: C.text }}>{item.name}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", color: "#4ade80", fontWeight: 600 }}>+{fmt(Math.round((item.annualCost||0)/12))}</td>
+                        <td style={{ padding: "4px 6px", color: C.textDim, fontSize: 11 }}>{item.startMonth} {item.startYear} – {item.endMonth} {item.endYear}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {/* Rolled Items */}
+            {rm && rm.length > 0 && (
+              <div style={{ background: "rgba(59,130,246,0.08)", borderRadius: 8, padding: "10px 14px", border: "1px solid rgba(59,130,246,0.25)" }}>
+                <div style={{ color: "#60a5fa", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>ROLLED INTO PROJECTIONS</div>
+                <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.cardBorder}33` }}>
+                      <th style={{ textAlign: "left", padding: "4px 6px", color: C.textDim, fontWeight: 500 }}>Name</th>
+                      <th style={{ textAlign: "right", padding: "4px 6px", color: C.textDim, fontWeight: 500 }}>Monthly</th>
+                      <th style={{ textAlign: "left", padding: "4px 6px", color: C.textDim, fontWeight: 500 }}>Rolled On</th>
+                      <th style={{ textAlign: "left", padding: "4px 6px", color: C.textDim, fontWeight: 500 }}>Requester</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rm.map(item => (
+                      <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
+                        <td style={{ padding: "4px 6px", color: C.text }}>{item.name}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", color: "#60a5fa", fontWeight: 600 }}>+{fmt(Math.round((item.annualCost||0)/12))}</td>
+                        <td style={{ padding: "4px 6px", color: "#4ade80", fontSize: 11 }}>{item.rolledDate}</td>
+                        <td style={{ padding: "4px 6px", color: C.textDim, fontSize: 11 }}>{item.requester}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {/* Total */}
+            <div style={{ background: C.totalBg, borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: C.textDim, fontWeight: 600, fontSize: 13 }}>Total Effective:</span>
+              <span style={{ color: C.actual, fontWeight: 700, fontSize: 18 }}>{fmt(totalEffective)}</span>
+            </div>
+            <button onClick={() => { setModal(null); onNav("projections"); }}
+              style={{ padding: "8px 16px", borderRadius: 8, background: C.accent, border: "none", color: "white", cursor: "pointer", fontSize: 13 }}>
+              <Pencil size={13} style={{ verticalAlign: "middle", marginRight: 6 }} />Edit Projections
+            </button>
+          </div>
         </Modal>
         );
       })()}
       {modal?.type === "transactions" && (
-        <Modal title={`${modal.row.a} – ${MONTHS[modal.month]} ${modal.year}`} onClose={() => setModal(null)}>
-          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
-                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Date</th>
-                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Vendor</th>
-                <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {modal.txs.map((tx, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
-                  <td style={{ padding: "6px 8px", color: C.textDim }}>{tx.d}</td>
-                  <td style={{ padding: "6px 8px", color: C.text }}>{tx.v}</td>
-                  <td style={{ textAlign: "right", padding: "6px 8px", color: C.actual, fontWeight: 600 }}>{fmt(tx.a)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Modal title={`Transactions — ${modal.row.a} — ${MONTHS[modal.month]} ${modal.year}`} onClose={() => setModal(null)}>
+          {modal.txs.length === 0 ? (
+            <div style={{ color: C.textDim, fontSize: 13, padding: "16px 0", textAlign: "center" }}>
+              No transactions found for this period
+              <div style={{ color: C.actual, fontWeight: 700, fontSize: 18, marginTop: 8 }}>
+                {fmt(computeEffective(UNIFIED_PL.findIndex(r => r.a === modal.row.a), modal.year, modal.month, projOverrides, approvedItems, rolledItems))}
+              </div>
+            </div>
+          ) : (
+            <>
+              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+                    <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Date</th>
+                    <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Vendor</th>
+                    <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modal.txs.map((tx, i) => (
+                    <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
+                      <td style={{ padding: "6px 8px", color: C.textDim }}>{tx.d}</td>
+                      <td style={{ padding: "6px 8px", color: C.text }}>{tx.v}</td>
+                      <td style={{ textAlign: "right", padding: "6px 8px", color: C.actual, fontWeight: 600 }}>{fmt(tx.a)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", borderTop: `1px solid ${C.cardBorder}`, paddingTop: 8 }}>
+                <span style={{ color: C.textDim, fontSize: 12, marginRight: 12 }}>Total:</span>
+                <span style={{ color: C.actual, fontWeight: 700, fontSize: 14 }}>{fmt(modal.txs.reduce((s,t)=>s+t.a,0))}</span>
+              </div>
+            </>
+          )}
         </Modal>
       )}
       {modal?.type === "breakdown" && (
@@ -789,7 +894,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
             <tbody>
               {modal.children.map((child, ci) => {
                 const childIdx = UNIFIED_PL.findIndex(r => r.a === child.a);
-                const v = computeEffective(childIdx, modal.year, modal.month, projOverrides, approvedItems);
+                const v = computeEffective(childIdx, modal.year, modal.month, projOverrides, approvedItems, rolledItems);
                 return v !== 0 ? (
                   <tr key={ci} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
                     <td style={{ padding: "6px 8px", color: C.text, paddingLeft: 6 + (child.i - modal.row.i) * 12 }}>{child.a}</td>
@@ -806,7 +911,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
 }
 
 // ─── Page: Projections (Editable) ────────────────────────────────────────────
-function Projections({ projOverrides, setProjOverrides, approvedItems }) {
+function Projections({ projOverrides, setProjOverrides, approvedItems, rolledItems }) {
   const C = useC();
   const [year, setYear] = useState(2027);
   const [editRow, setEditRow] = useState(null);
@@ -908,7 +1013,7 @@ function Projections({ projOverrides, setProjOverrides, approvedItems }) {
                     {MONTHS.map((_, mi) => {
                       const isAct = isActualMonth(year, mi);
                       const effVal = rowIdx >= 0
-                        ? computeEffective(rowIdx, year, mi, projOverrides, approvedItems)
+                        ? computeEffective(rowIdx, year, mi, projOverrides, approvedItems, rolledItems)
                         : (getRowData(row, year)?.[mi] ?? 0);
                       const hasOverride = !isAct && isLeaf && projOverrides?.[a]?.[`${year}_${mi}`] !== undefined;
                       return (
@@ -934,7 +1039,7 @@ function Projections({ projOverrides, setProjOverrides, approvedItems }) {
                     <td style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>
                       {(() => {
                         const t = rowIdx >= 0
-                          ? MONTHS.reduce((s,_,mi) => s + computeEffective(rowIdx, year, mi, projOverrides, approvedItems), 0)
+                          ? MONTHS.reduce((s,_,mi) => s + computeEffective(rowIdx, year, mi, projOverrides, approvedItems, rolledItems), 0)
                           : sum(getRowData(row, year) || []);
                         return t ? fmt(t, true) : "—";
                       })()}
@@ -1594,10 +1699,17 @@ function WishListForm({ item, onSave, onCancel }) {
         </div>
         <div>
           <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>GL Code (for P&L projection)</label>
-          <input value={form.glCode || ""} onChange={e => set("glCode", e.target.value)}
-            placeholder="e.g. 605301 Software Subscriptions"
+          <select
+            value={form.glCode || ""}
+            onChange={e => set("glCode", e.target.value)}
             style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
-              padding: "6px 10px", color: C.text, fontSize: 13, boxSizing: "border-box" }} />
+              padding: "6px 10px", color: form.glCode ? C.text : C.textDim, fontSize: 12 }}
+          >
+            <option value="">— Select GL Account —</option>
+            {UNIFIED_PL.filter(r => isLeafGL(r.a)).map(r => (
+              <option key={r.a} value={r.a}>{r.a}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Annual Cost ($)</label>
@@ -1631,7 +1743,7 @@ function WishListForm({ item, onSave, onCancel }) {
   );
 }
 
-function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds }) {
+function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledItems, setRolledItems }) {
   const C = useC();
   const defaultChecked = new Set((wishList || WISH_LIST).filter(w => w.status === "plan").map(w => w.id));
   const [checked, setChecked] = useState(defaultChecked);
@@ -1901,6 +2013,29 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds }) {
                             border: "none", background: "rgba(239,68,68,0.15)", color: "#f87171" }}>
                           ✕
                         </button>
+                        {approvedIds?.has(item.id) && item.glCode && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (!window.confirm(`Roll "${item.name}" into Projections? This will remove it from the Wish List.`)) return;
+                              const rolled = {
+                                ...item,
+                                rolledDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                              };
+                              setRolledItems && setRolledItems(prev => [...prev, rolled]);
+                              setWishList && setWishList(prev => prev.filter(w => w.id !== item.id));
+                              setApprovedIds && setApprovedIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+                            }}
+                            style={{
+                              padding: "3px 8px", borderRadius: 4, background: "rgba(59,130,246,0.15)",
+                              border: "1px solid rgba(59,130,246,0.4)", color: "#60a5fa",
+                              fontSize: 11, cursor: "pointer", marginLeft: 4, fontWeight: 600, whiteSpace: "nowrap"
+                            }}
+                            title="Move this approved item permanently into Projections"
+                          >
+                            📥 Roll in
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1910,6 +2045,36 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds }) {
           </table>
         </div>
       </Card>
+      {/* Rolled into Projections Section */}
+      {rolledItems && rolledItems.length > 0 && (
+        <Card>
+          <h4 style={{ color: "#60a5fa", margin: "0 0 12px", fontSize: 14, fontWeight: 700 }}>📥 Rolled into Projections</h4>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Name</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>GL Code</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Requester</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>Annual Cost</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Active Period</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Rolled On</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rolledItems.map(item => (
+                <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
+                  <td style={{ padding: "6px 8px", color: C.text }}>{item.name}</td>
+                  <td style={{ padding: "6px 8px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode}</td>
+                  <td style={{ padding: "6px 8px", color: C.textDim }}>{item.requester}</td>
+                  <td style={{ padding: "6px 8px", color: C.projection, textAlign: "right", fontWeight: 600 }}>{fmt(item.annualCost)}/yr</td>
+                  <td style={{ padding: "6px 8px", color: C.textDim }}>{item.startMonth} {item.startYear} – {item.endMonth} {item.endYear}</td>
+                  <td style={{ padding: "6px 8px", color: "#4ade80" }}>{item.rolledDate}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
     </div>
   );
 }
@@ -2041,6 +2206,7 @@ export default function App() {
   const approvedItems = wishListItems.filter(w => approvedItemIds.has(w.id));
   const [projOverrides, setProjOverrides] = useState({});
   const [adjOverrides, setAdjOverrides] = useState({});
+  const [rolledItems, setRolledItems] = useState([]);
 
   const handleNav = useCallback((p) => setPage(p), []);
 
@@ -2142,12 +2308,12 @@ export default function App() {
 
         {/* Page content */}
         {page === "dashboard" && <Dashboard onNav={handleNav} />}
-        {page === "fullpl" && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} />}
-        {page === "projections" && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} />}
+        {page === "fullpl" && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} rolledItems={rolledItems} />}
+        {page === "projections" && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-summary" && <AvBSummary />}
         {page === "avb-detail" && <AvBDetail />}
-        {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} />}
-        {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} />}
+        {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} rolledItems={rolledItems} setRolledItems={setRolledItems} />}
+        {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} rolledItems={rolledItems} />}
       </main>
       {/* Floating AI Chat Widget */}
       <FCAAssistant />
