@@ -55,6 +55,47 @@ const isTotal = (a) => a.startsWith("Total ") || a === "Gross Profit" || a === "
 const isHeader = (a) => ["Income","Cost of Goods Sold","Expenses","Other Expenses","Net Other Income"].includes(a) || a.startsWith("Check");
 const displayLabel = (a) => a === "Other Expenses" ? "Depreciation & Amortization" : a;
 
+// ─── Formula Engine ──────────────────────────────────────────────────────────
+const isLeafGL = (a) => /^\d{5,6}\s/.test(a);
+
+const isInPeriod = (item, year, monthIdx) => {
+  const sy = parseInt(item.startYear) || 2026;
+  const sm = Math.max(0, MONTHS.indexOf(item.startMonth || "Jan"));
+  const ey = parseInt(item.endYear) || 2028;
+  const em2 = MONTHS.indexOf(item.endMonth || "Dec");
+  const em = em2 >= 0 ? em2 : 11;
+  const cur = year * 12 + monthIdx;
+  return cur >= sy * 12 + sm && cur <= ey * 12 + em;
+};
+
+const getLeafEffective = (row, year, monthIdx, projOverrides, approvedItems) => {
+  if (isActualMonth(year, monthIdx)) return getRowData(row, year)?.[monthIdx] ?? 0;
+  const base = getRowData(row, year)?.[monthIdx] ?? 0;
+  const key = `${year}_${monthIdx}`;
+  const override = projOverrides?.[row.a]?.[key];
+  const scenarioAdd = (approvedItems || [])
+    .filter(item => item.glCode === row.a && isInPeriod(item, year, monthIdx))
+    .reduce((s, item) => s + ((item.annualCost || 0) / 12), 0);
+  return (override !== undefined ? override : base) + scenarioAdd;
+};
+
+const computeEffective = (rowIdx, year, monthIdx, projOverrides, approvedItems) => {
+  const row = UNIFIED_PL[rowIdx];
+  if (!row) return 0;
+  if (isActualMonth(year, monthIdx)) return getRowData(row, year)?.[monthIdx] ?? 0;
+  if (isLeafGL(row.a)) return getLeafEffective(row, year, monthIdx, projOverrides, approvedItems);
+  // Find direct children
+  const children = [];
+  for (let ci = rowIdx + 1; ci < UNIFIED_PL.length; ci++) {
+    if (UNIFIED_PL[ci].i <= row.i) break;
+    if (UNIFIED_PL[ci].i === row.i + 1) children.push(ci);
+  }
+  if (children.length > 0) {
+    return children.reduce((s, ci) => s + computeEffective(ci, year, monthIdx, projOverrides, approvedItems), 0);
+  }
+  return getRowData(row, year)?.[monthIdx] ?? 0;
+};
+
 // ─── FCA Logo ─────────────────────────────────────────────────────────────────
 const FCALogo = ({ size = 36 }) => (
   <svg width={size} height={size} viewBox="0 0 100 100" fill="none">
@@ -455,11 +496,12 @@ function Dashboard({ onNav }) {
 }
 
 // ─── Page: Full P&L ───────────────────────────────────────────────────────────
-function FullPL({ onNav, onSelectTx, approvedItems }) {
+function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides }) {
   const C = useC();
   const [year, setYear] = useState(2026);
   const [expanded, setExpanded] = useState(new Set(["Income","Expenses","Cost of Goods Sold"]));
   const [modal, setModal] = useState(null);
+  const [editingCell, setEditingCell] = useState(null);
 
   const toggle = (a) => setExpanded(prev => {
     const next = new Set(prev);
@@ -471,13 +513,11 @@ function FullPL({ onNav, onSelectTx, approvedItems }) {
   const visibleRows = useMemo(() => {
     const vis = [];
     const parentStack = [];
-    for (const row of UNIFIED_PL) {
+    UNIFIED_PL.forEach((row, idx) => {
       const { a, i } = row;
-      // Trim parent stack to current indent
       while (parentStack.length > i) parentStack.pop();
-      // Check all ancestors are expanded
       const allExpanded = parentStack.every(p => expanded.has(p));
-      if (allExpanded) vis.push(row);
+      if (allExpanded) vis.push({ ...row, _idx: idx });
       if (i === parentStack.length) parentStack.push(a);
     }
     return vis;
@@ -500,11 +540,22 @@ function FullPL({ onNav, onSelectTx, approvedItems }) {
 
   const handleCellClick = (row, monthIdx) => {
     if (isActualMonth(year, monthIdx)) {
-      // Direct drill-through to transactions
-      onSelectTx && onSelectTx(row.a, monthIdx);
+      const txs = TRANSACTIONS.filter(t => t.g === row.a && t.m === monthIdx);
+      if (txs.length > 0) {
+        setModal({ type: "transactions", row, month: monthIdx, year, txs });
+      }
     } else {
-      // Show projection info modal
-      setModal({ type: "projection", row, month: monthIdx, year });
+      const base = row._idx ?? UNIFIED_PL.findIndex(r => r.a === row.a);
+      const children = [];
+      for (let ci = base + 1; ci < UNIFIED_PL.length; ci++) {
+        if (UNIFIED_PL[ci].i <= UNIFIED_PL[base].i) break;
+        children.push(UNIFIED_PL[ci]);
+      }
+      if (children.length > 0) {
+        setModal({ type: "breakdown", row, month: monthIdx, year, children });
+      } else {
+        setModal({ type: "projection", row, month: monthIdx, year });
+      }
     }
   };
 
@@ -521,6 +572,12 @@ function FullPL({ onNav, onSelectTx, approvedItems }) {
               {yr}
             </button>
           ))}
+          {projOverrides && Object.keys(projOverrides).length > 0 && (
+            <button onClick={() => setProjOverrides({})}
+              style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid #f59e0b`, background: "rgba(245,158,11,0.1)", color: "#f59e0b", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+              Reset Edits
+            </button>
+          )}
 
         </div>
       </div>
@@ -579,26 +636,57 @@ function FullPL({ onNav, onSelectTx, approvedItems }) {
                       </span>
                     </td>
                     {/* Monthly value cells */}
-                    {(vals || Array(12).fill(null)).map((v, mi) => {
+                    {MONTHS.map((_, mi) => {
                       const isAct = isActualMonth(year, mi);
-                      const val = v || 0;
+                      const rowIdx = row._idx ?? UNIFIED_PL.findIndex(r => r.a === row.a);
+                      const effVal = computeEffective(rowIdx, year, mi, projOverrides, approvedItems);
+                      const isLeaf = isLeafGL(row.a);
+                      const isEditing = editingCell?.rowA === row.a && editingCell?.year === year && editingCell?.monthIdx === mi;
+                      const hasOverride = !isAct && isLeaf && projOverrides?.[row.a]?.[`${year}_${mi}`] !== undefined;
                       return (
-                        <td key={mi} onClick={() => val && handleCellClick(row, mi)}
+                        <td key={mi}
+                          onClick={() => effVal && handleCellClick(row, mi)}
                           style={{ textAlign: "right", padding: "7px 8px",
                             color: isAct ? C.actual : C.projection,
-                            background: !isAct ? C.projBg : "transparent",
-                            cursor: val ? "pointer" : "default",
+                            background: hasOverride ? "rgba(245,158,11,0.08)" : !isAct ? C.projBg : "transparent",
+                            cursor: (!isAct && isLeaf) ? "text" : (effVal ? "pointer" : "default"),
                             borderLeft: mi === 5 && year === 2026 ? `2px dashed ${C.cardBorder}` : "none",
                             fontWeight: isTot ? 700 : 400 }}
-                          onMouseEnter={e => val && (e.currentTarget.style.background = "#1e3a6e55")}
-                          onMouseLeave={e => e.currentTarget.style.background = !isAct ? C.projBg : "transparent"}>
-                          {val ? fmt(val, true) : "—"}
+                          onMouseEnter={e => !isEditing && (e.currentTarget.style.background = "#1e3a6e55")}
+                          onMouseLeave={e => e.currentTarget.style.background = hasOverride ? "rgba(245,158,11,0.08)" : !isAct ? C.projBg : "transparent"}>
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              type="number"
+                              defaultValue={effVal}
+                              onBlur={e => {
+                                const newVal = parseFloat(e.target.value);
+                                if (!isNaN(newVal)) {
+                                  setProjOverrides(prev => ({ ...prev, [row.a]: { ...(prev[row.a] || {}), [`${year}_${mi}`]: newVal } }));
+                                }
+                                setEditingCell(null);
+                              }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingCell(null); }}
+                              onClick={e => e.stopPropagation()}
+                              style={{ width: "90%", background: "transparent", border: "1px solid #3b82f6", borderRadius: 4, color: "inherit", textAlign: "right", padding: "2px 4px", fontSize: "inherit" }}
+                            />
+                          ) : (
+                            <span
+                              onDoubleClick={e => { e.stopPropagation(); if (!isAct && isLeaf) setEditingCell({ rowA: row.a, year, monthIdx: mi }); }}
+                              title={!isAct && isLeaf ? "Double-click to edit" : undefined}>
+                              {effVal ? fmt(effVal, true) : "—"}
+                            </span>
+                          )}
                         </td>
                       );
                     })}
                     {/* Total */}
                     <td style={{ textAlign: "right", padding: "7px 8px", color: isTot ? C.actual : C.textDim, fontWeight: isTot ? 700 : 400 }}>
-                      {rowTotal ? fmt(rowTotal, true) : "—"}
+                      {(() => {
+                        const rowIdx2 = row._idx ?? UNIFIED_PL.findIndex(r => r.a === row.a);
+                        const total = MONTHS.reduce((s, _, mi) => s + computeEffective(rowIdx2, year, mi, projOverrides, approvedItems), 0);
+                        return total ? fmt(total, true) : "—";
+                      })()}
                     </td>
                   </tr>
                 );
@@ -667,12 +755,58 @@ function FullPL({ onNav, onSelectTx, approvedItems }) {
         </Modal>
         );
       })()}
+      {modal?.type === "transactions" && (
+        <Modal title={`${modal.row.a} – ${MONTHS[modal.month]} ${modal.year}`} onClose={() => setModal(null)}>
+          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Date</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Vendor</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modal.txs.map((tx, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
+                  <td style={{ padding: "6px 8px", color: C.textDim }}>{tx.d}</td>
+                  <td style={{ padding: "6px 8px", color: C.text }}>{tx.v}</td>
+                  <td style={{ textAlign: "right", padding: "6px 8px", color: C.actual, fontWeight: 600 }}>{fmt(tx.a)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Modal>
+      )}
+      {modal?.type === "breakdown" && (
+        <Modal title={`${modal.row.a} – ${MONTHS[modal.month]} ${modal.year} Breakdown`} onClose={() => setModal(null)}>
+          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Account</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modal.children.map((child, ci) => {
+                const childIdx = UNIFIED_PL.findIndex(r => r.a === child.a);
+                const v = computeEffective(childIdx, modal.year, modal.month, projOverrides, approvedItems);
+                return v !== 0 ? (
+                  <tr key={ci} style={{ borderBottom: `1px solid ${C.cardBorder}22` }}>
+                    <td style={{ padding: "6px 8px", color: C.text, paddingLeft: 6 + (child.i - modal.row.i) * 12 }}>{child.a}</td>
+                    <td style={{ textAlign: "right", padding: "6px 8px", color: C.projection, fontWeight: 600 }}>{fmt(v)}</td>
+                  </tr>
+                ) : null;
+              })}
+            </tbody>
+          </table>
+        </Modal>
+      )}
     </div>
   );
 }
 
 // ─── Page: Projections (Editable) ────────────────────────────────────────────
-function Projections() {
+function Projections({ projOverrides, setProjOverrides, approvedItems }) {
   const C = useC();
   const [year, setYear] = useState(2027);
   const [editRow, setEditRow] = useState(null);
@@ -715,7 +849,7 @@ function Projections() {
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Projections</h2>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          {[2027, 2028].map(yr => (
+          {[2026, 2027, 2028].map(yr => (
             <button key={yr} onClick={() => setYear(yr)}
               style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${year === yr ? C.accent : C.cardBorder}`,
                 background: year === yr ? C.accent : "transparent", color: C.actual, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
@@ -760,8 +894,8 @@ function Projections() {
             <tbody>
               {projRows.map((row) => {
                 const { a, i } = row;
-                const vals = editRow === a ? editVals : (getRowData(row, year) || Array(12).fill(0));
-                const rowTotal = sum(vals);
+                const isLeaf = isLeafGL(a);
+                const rowIdx = UNIFIED_PL.findIndex(r => r.a === a);
                 const isEditingThis = editRow === a;
 
                 return (
@@ -771,19 +905,40 @@ function Projections() {
                     <td style={{ padding: "8px 12px", color: C.text, paddingLeft: 12 + i * 14 }}>
                       {row.isCustom && <Badge color={C.positive}>Custom</Badge>} {a}
                     </td>
-                    {vals.map((v, mi) => (
-                      <td key={mi} style={{ textAlign: "right", padding: "6px 4px", color: C.projection }}>
-                        {isEditingThis ? (
-                          <input type="number" value={v || 0}
-                            onChange={e => setEditVals(ev => ev.map((x, xi) => xi === mi ? parseFloat(e.target.value) || 0 : x))}
-                            style={{ width: 72, background: C.bg, border: `1px solid ${C.accent}`, borderRadius: 4,
-                              color: C.actual, padding: "2px 4px", fontSize: 11, textAlign: "right" }} />
-                        ) : (
-                          <span>{v ? fmt(v, true) : "—"}</span>
-                        )}
-                      </td>
-                    ))}
-                    <td style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>{fmt(rowTotal, true)}</td>
+                    {MONTHS.map((_, mi) => {
+                      const isAct = isActualMonth(year, mi);
+                      const effVal = rowIdx >= 0
+                        ? computeEffective(rowIdx, year, mi, projOverrides, approvedItems)
+                        : (getRowData(row, year)?.[mi] ?? 0);
+                      const hasOverride = !isAct && isLeaf && projOverrides?.[a]?.[`${year}_${mi}`] !== undefined;
+                      return (
+                        <td key={mi} style={{ textAlign: "right", padding: "6px 4px",
+                          color: isAct ? C.actual : C.projection,
+                          background: hasOverride ? "rgba(245,158,11,0.08)" : "transparent" }}>
+                          {isEditingThis && !isAct ? (
+                            <input type="number" defaultValue={effVal}
+                              onBlur={e => {
+                                const nv = parseFloat(e.target.value);
+                                if (!isNaN(nv) && setProjOverrides) {
+                                  setProjOverrides(prev => ({ ...prev, [a]: { ...(prev[a] || {}), [`${year}_${mi}`]: nv } }));
+                                }
+                              }}
+                              style={{ width: 72, background: C.bg, border: `1px solid ${C.accent}`, borderRadius: 4,
+                                color: C.actual, padding: "2px 4px", fontSize: 11, textAlign: "right" }} />
+                          ) : (
+                            <span>{effVal ? fmt(effVal, true) : "—"}</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>
+                      {(() => {
+                        const t = rowIdx >= 0
+                          ? MONTHS.reduce((s,_,mi) => s + computeEffective(rowIdx, year, mi, projOverrides, approvedItems), 0)
+                          : sum(getRowData(row, year) || []);
+                        return t ? fmt(t, true) : "—";
+                      })()}
+                    </td>
                     <td style={{ textAlign: "center", padding: "6px 8px" }}>
                       {isEditingThis ? (
                         <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
@@ -1364,7 +1519,8 @@ function WishListForm({ item, onSave, onCancel }) {
   const C = useC();
   const [form, setForm] = React.useState(item || {
     name: "", requester: "", category: "", priority: "Keep Lights On",
-    startMonth: "Jan", annualCost: 0, status: "plan", type: "expense"
+    startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028,
+    annualCost: 0, status: "plan", type: "expense", glCode: ""
   });
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
   const PRIORITIES = ["Keep Lights On","Revenue Growth","Product","Retention","Security","Operations","Leadership","Innovation"];
@@ -1411,6 +1567,37 @@ function WishListForm({ item, onSave, onCancel }) {
               padding: "6px 10px", color: C.text, fontSize: 13 }}>
             {MONTHS_SHORT.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Start Year</label>
+          <select value={form.startYear || 2026} onChange={e => set("startYear", Number(e.target.value))}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13 }}>
+            {[2026,2027,2028].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>End Month</label>
+          <select value={form.endMonth || "Dec"} onChange={e => set("endMonth", e.target.value)}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13 }}>
+            {MONTHS_SHORT.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>End Year</label>
+          <select value={form.endYear || 2028} onChange={e => set("endYear", Number(e.target.value))}
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13 }}>
+            {[2026,2027,2028].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>GL Code (for P&L projection)</label>
+          <input value={form.glCode || ""} onChange={e => set("glCode", e.target.value)}
+            placeholder="e.g. 605301 Software Subscriptions"
+            style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
+              padding: "6px 10px", color: C.text, fontSize: 13, boxSizing: "border-box" }} />
         </div>
         <div>
           <label style={{ color: C.textDim, fontSize: 11, display: "block", marginBottom: 4 }}>Annual Cost ($)</label>
@@ -1525,6 +1712,23 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds }) {
             Total approved: <strong style={{ color: "#4ade80" }}>
               {fmt((wishList || WISH_LIST).filter(w => approvedIds.has(w.id)).reduce((s,w) => s + w.annualCost, 0), true)}/yr
             </strong>
+          </div>
+          <div style={{ marginTop: 12, padding: "10px 12px", background: "#0d1f3c", borderRadius: 8, border: `1px solid ${C.accent}33` }}>
+            <div style={{ color: C.textDim, fontSize: 11, marginBottom: 6, fontWeight: 600 }}>P&L Impact Preview (monthly add to projection)</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {(wishList || WISH_LIST).filter(w => approvedIds.has(w.id) && w.glCode).map(item => (
+                <div key={item.id} style={{ background: "#1e3a6e33", border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "4px 10px", fontSize: 11 }}>
+                  <span style={{ color: C.textDim }}>{item.glCode}: </span>
+                  <span style={{ color: C.projection, fontWeight: 600 }}>+{fmt(Math.round((item.annualCost||0)/12))}/mo</span>
+                  <span style={{ color: C.textDim, fontSize: 10 }}> ({item.startMonth||"Jan"} {item.startYear||2026}–{item.endMonth||"Dec"} {item.endYear||2028})</span>
+                </div>
+              ))}
+              {(wishList || WISH_LIST).filter(w => approvedIds.has(w.id) && !w.glCode).length > 0 && (
+                <div style={{ color: C.textDim, fontSize: 11, fontStyle: "italic" }}>
+                  {(wishList || WISH_LIST).filter(w => approvedIds.has(w.id) && !w.glCode).length} item(s) have no GL code — edit to link to P&L
+                </div>
+              )}
+            </div>
           </div>
         </Card>
       )}
@@ -1750,7 +1954,7 @@ const ADJ_EBITDA_ADDBACKS = {
   total: [64052,63085,65685,66583,66897,70105,70105,70105,70105,70105,70105,70105],
 };
 
-function AdjEbitda() {
+function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides }) {
   const C = useC();
   const [selYear, setSelYear] = useState(2026);
   
@@ -1831,17 +2035,14 @@ export default function App() {
   const [fontSize, setFontSize] = useState("md");
   const [darkMode, setDarkMode] = useState(true);
   const C = darkMode ? DARK_THEME : LIGHT_THEME;
-  const [txFilter, setTxFilter] = useState({ account: null, month: null });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [wishListItems, setWishListItems] = useState(WISH_LIST);
   const [approvedItemIds, setApprovedItemIds] = useState(new Set());
   const approvedItems = wishListItems.filter(w => approvedItemIds.has(w.id));
+  const [projOverrides, setProjOverrides] = useState({});
+  const [adjOverrides, setAdjOverrides] = useState({});
 
   const handleNav = useCallback((p) => setPage(p), []);
-  const handleSelectTx = useCallback((account, month) => {
-    setTxFilter({ account, month });
-    setPage("transactions");
-  }, []);
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -1849,7 +2050,6 @@ export default function App() {
     { id: "projections", label: "Projections", icon: TrendingUp },
     { id: "avb-summary", label: "Actuals vs Budget", icon: BarChart2, sub: "Summary" },
     { id: "avb-detail", label: "Actuals vs Budget", icon: BarChart2, sub: "Detail" },
-    { id: "transactions", label: "Transactions", icon: FileText },
     { id: "scenarios", label: "Scenarios", icon: Sliders },
     { id: "adj-ebitda", label: "Adj. EBITDA", icon: TrendingUp },
   ];
@@ -1942,13 +2142,12 @@ export default function App() {
 
         {/* Page content */}
         {page === "dashboard" && <Dashboard onNav={handleNav} />}
-        {page === "fullpl" && <FullPL onNav={handleNav} onSelectTx={handleSelectTx} approvedItems={approvedItems} />}
-        {page === "projections" && <Projections />}
+        {page === "fullpl" && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} />}
+        {page === "projections" && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} />}
         {page === "avb-summary" && <AvBSummary />}
         {page === "avb-detail" && <AvBDetail />}
-        {page === "transactions" && <Transactions filterAccount={txFilter.account} filterMonth={txFilter.month} />}
         {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} />}
-        {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} />}
+        {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} />}
       </main>
       {/* Floating AI Chat Widget */}
       <FCAAssistant />
