@@ -70,7 +70,16 @@ const isInPeriod = (item, year, monthIdx) => {
 
 const getLeafEffective = (row, year, monthIdx, projOverrides, approvedItems, rolledItems) => {
   if (isActualMonth(year, monthIdx)) return getRowData(row, year)?.[monthIdx] ?? 0;
-  const base = getRowData(row, year)?.[monthIdx] ?? 0;
+
+  // UNIFIED_PL v26 only has actuals (Jan–May); projected months are null.
+  // Fall back to the Jan–May average so projections start from a realistic baseline.
+  let base = getRowData(row, year)?.[monthIdx];
+  if ((base === null || base === undefined) && year === 2026) {
+    const acts = (row.v26 || []).slice(0, ACTUALS_THRU + 1).filter(v => v != null);
+    base = acts.length > 0 ? acts.reduce((s, v) => s + v, 0) / acts.length : 0;
+  }
+  base = base ?? 0;
+
   const key = `${year}_${monthIdx}`;
   const override = projOverrides?.[row.a]?.[key];
   const scenarioAdd = (approvedItems || [])
@@ -97,6 +106,24 @@ const computeEffective = (rowIdx, year, monthIdx, projOverrides, approvedItems, 
     return children.reduce((s, ci) => s + computeEffective(ci, year, monthIdx, projOverrides, approvedItems, rolledItems), 0);
   }
   return getRowData(row, year)?.[monthIdx] ?? 0;
+};
+
+// ─── Live KPI Computer ────────────────────────────────────────────────────────
+// Computes monthly P&L KPIs using live formula engine (replaces static KPIS_ALL)
+// Uses top-level aggregate rows from UNIFIED_PL:
+//   43=Total Income, 84=Total COGS, 85=Gross Profit, 205=Total Expenses, 217=Total Other Expenses (D&A), 219=Net Income
+const LIVE_KPI_ROWS = { rev: 43, cogs: 84, gp: 85, exp: 205, da: 217, ni: 219 };
+const computeLiveKPIs = (year, projOverrides, approvedItems, rolledItems) => {
+  return Array.from({ length: 12 }, (_, m) => {
+    const rev  = computeEffective(LIVE_KPI_ROWS.rev,  year, m, projOverrides, approvedItems, rolledItems);
+    const cogs = computeEffective(LIVE_KPI_ROWS.cogs, year, m, projOverrides, approvedItems, rolledItems);
+    const gp   = computeEffective(LIVE_KPI_ROWS.gp,   year, m, projOverrides, approvedItems, rolledItems);
+    const exp  = computeEffective(LIVE_KPI_ROWS.exp,  year, m, projOverrides, approvedItems, rolledItems);
+    const da   = computeEffective(LIVE_KPI_ROWS.da,   year, m, projOverrides, approvedItems, rolledItems);
+    const ni   = computeEffective(LIVE_KPI_ROWS.ni,   year, m, projOverrides, approvedItems, rolledItems);
+    const ebitda = ni + da;
+    return { rev, cogs, gp, exp, da, ni, ebitda };
+  });
 };
 
 // ─── FCA Logo ─────────────────────────────────────────────────────────────────
@@ -503,7 +530,7 @@ function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
 }
 
 // ─── Page: Dashboard ──────────────────────────────────────────────────────────
-function Dashboard({ onNav }) {
+function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
   const C = useC();
   const [selYear, setSelYear] = useState(2026);
   const [period, setPeriod] = useState("Full Year");
@@ -512,45 +539,62 @@ function Dashboard({ onNav }) {
   const [customStart, setCustomStart] = useState(0);
   const [customEnd, setCustomEnd] = useState(11);
 
-  const getKPIsForPeriod = (year) => {
-    const k = KPIS_ALL[String(year)];
-    if (!k) return {};
-    const slice = (arr) => {
-      if (period === "YTD") return arr.slice(0, 5);
-      if (period === "Monthly") return [arr[selMonthIdx] || 0];
-      if (period === "Custom") return arr.slice(customStart, customEnd + 1);
-      return arr;
+  // Live monthly KPIs for selected year (re-computes whenever overrides/approvals change)
+  const liveMonthly = useMemo(() =>
+    computeLiveKPIs(selYear, projOverrides, approvedItems, rolledItems),
+    [selYear, projOverrides, approvedItems, rolledItems]
+  );
+
+  const getKPIsForPeriod = () => {
+    let months;
+    if (period === "YTD") months = liveMonthly.slice(0, ACTUALS_THRU + 1);
+    else if (period === "Monthly") months = [liveMonthly[selMonthIdx]].filter(Boolean);
+    else if (period === "Custom") months = liveMonthly.slice(customStart, customEnd + 1);
+    else months = liveMonthly;
+    const s = (key) => months.reduce((acc, m) => acc + (m[key] ?? 0), 0);
+    const rev = s("rev"), cogs = s("cogs"), gp = s("gp"), exp = s("exp"), ni = s("ni"), ebitda = s("ebitda");
+    return {
+      revenue: rev, cogs, grossProfit: gp, expenses: exp, netIncome: ni, ebitda,
+      fcf: ebitda * 0.72, adjEbitda: ebitda,
+      gpMargin: rev ? gp / rev : 0, niMargin: rev ? ni / rev : 0, ebitdaMargin: rev ? ebitda / rev : 0,
     };
-    const rev = sum(slice(k.rev));
-    const cogs = sum(slice(k.cogs));
-    const gp = sum(slice(k.gp));
-    const exp = sum(slice(k.exp));
-    const ni = sum(slice(k.ni));
-    const ebitda = sum(slice(k.ebitda));
-    const fcf = ni + sum(slice(k.ebitda)) - ni; // proxy: ebitda - capex approx
-    const adjEbitda = ebitda; // same as ebitda unless overridden
-    return { revenue: rev, cogs, grossProfit: gp, expenses: exp, netIncome: ni, ebitda, fcf: ebitda * 0.72, adjEbitda,
-      gpMargin: rev ? gp / rev : 0, niMargin: rev ? ni / rev : 0, ebitdaMargin: rev ? ebitda / rev : 0 };
   };
 
-  const kpi = getKPIsForPeriod(selYear);
-  const prevKpi = selYear > 2026 ? getKPIsForPeriod(selYear - 1) : null;
+  const kpi = getKPIsForPeriod();
+  const prevLiveMonthly = useMemo(() =>
+    selYear > 2026 ? computeLiveKPIs(selYear - 1, projOverrides, approvedItems, rolledItems) : null,
+    [selYear, projOverrides, approvedItems, rolledItems]
+  );
+  const prevKpi = useMemo(() => {
+    if (!prevLiveMonthly) return null;
+    const s = (key) => prevLiveMonthly.reduce((acc, m) => acc + (m[key] ?? 0), 0);
+    const rev = s("rev"), cogs = s("cogs"), gp = s("gp"), exp = s("exp"), ni = s("ni"), ebitda = s("ebitda");
+    return { revenue: rev, cogs, grossProfit: gp, expenses: exp, netIncome: ni, ebitda, fcf: ebitda * 0.72, adjEbitda: ebitda };
+  }, [prevLiveMonthly]);
 
-  const getChartDataForPeriod = (year) => {
-    const full = getMonthlyChart(year);
-    if (period === "YTD") return full.slice(0, 5);
+  const getChartDataForPeriod = () => {
+    const full = liveMonthly.map((m, i) => ({
+      month: MONTHS[i],
+      Revenue: m.rev,
+      "Gross Profit": m.gp,
+      Expenses: m.exp,
+      "Net Income": m.ni,
+      isActual: isActualMonth(selYear, i),
+    }));
+    if (period === "YTD") return full.slice(0, ACTUALS_THRU + 1);
     if (period === "Monthly") return [full[selMonthIdx]].filter(Boolean);
     if (period === "Custom") return full.slice(customStart, customEnd + 1);
     return full;
   };
-  const chartData = getChartDataForPeriod(selYear);
+  const chartData = getChartDataForPeriod();
 
   const ytChange = (curr, prev) => prev && prev !== 0 ? (curr - prev) / Math.abs(prev) : null;
 
-  const annualSummary = YEARS.map(yr => {
-    const k = getAnnualKPIs(yr);
-    return { year: yr, ...k };
-  });
+  const annualSummary = useMemo(() => YEARS.map(yr => {
+    const monthly = computeLiveKPIs(yr, projOverrides, approvedItems, rolledItems);
+    const s = (key) => monthly.reduce((acc, m) => acc + (m[key] ?? 0), 0);
+    return { year: yr, revenue: s("rev"), cogs: s("cogs"), grossProfit: s("gp"), expenses: s("exp"), netIncome: s("ni"), ebitda: s("ebitda") };
+  }), [projOverrides, approvedItems, rolledItems]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -699,10 +743,11 @@ function Dashboard({ onNav }) {
                 { label: "Adj. EBITDA", key: "adjEbitda", isInput: true },
               ].map(({ label, key, isMar, nav, bold, indent, highlight, isInput }) => {
                 const getVal = (yr) => {
-                  if (key === "da") { const k = KPIS_ALL[String(yr)]; return k ? sum(k.ebitda) - sum(k.ni) : 0; }
-                  if (key === "ebitdaMar") { const k = getAnnualKPIs(yr); return k.revenue ? k.ebitda / k.revenue : 0; }
-                  if (key === "adjEbitda") { const inputVal = adjEbitdaInput[yr]; return inputVal !== "" ? parseFloat(inputVal.replace(/[,$]/g, "")) || 0 : getAnnualKPIs(yr).ebitda; }
-                  return getAnnualKPIs(yr)[key] ?? 0;
+                  const liveYear = annualSummary.find(s => s.year === yr) || {};
+                  if (key === "da") { return (liveYear.ebitda ?? 0) - (liveYear.netIncome ?? 0); }
+                  if (key === "ebitdaMar") { return liveYear.revenue ? (liveYear.ebitda ?? 0) / liveYear.revenue : 0; }
+                  if (key === "adjEbitda") { const inputVal = adjEbitdaInput[yr]; return inputVal !== "" ? parseFloat(inputVal.replace(/[,$]/g, "")) || 0 : (liveYear.ebitda ?? 0); }
+                  return liveYear[key] ?? 0;
                 };
                 const getPlanVal = () => {
                   if (key === "ebitdaMar") return planTotals.revenue ? planTotals.ebitda / planTotals.revenue : 0;
@@ -1401,26 +1446,37 @@ function Projections({ projOverrides, setProjOverrides, approvedItems, rolledIte
 }
 
 // ─── Page: Actuals vs Budget – Summary ───────────────────────────────────────
-function AvBSummary() {
+function AvBSummary({ projOverrides, approvedItems, rolledItems }) {
   const C = useC();
-  const k26 = KPIS_ALL["2026"];
-  const kpis27 = KPIS_ALL["2027"];
+  const live26 = useMemo(() =>
+    computeLiveKPIs(2026, projOverrides, approvedItems, rolledItems),
+    [projOverrides, approvedItems, rolledItems]
+  );
 
   const summaryData = MONTHS.map((m, i) => ({
     month: m,
-    "Actual Revenue": i <= ACTUALS_THRU ? (k26.rev[i] || 0) : null,
-    "Budget Revenue": k26.rev[i] || 0,
-    "Actual Expenses": i <= ACTUALS_THRU ? (k26.exp[i] || 0) : null,
-    "Budget Expenses": k26.exp[i] || 0,
-    "Actual Net Income": i <= ACTUALS_THRU ? (k26.ni[i] || 0) : null,
-    "Budget Net Income": k26.ni[i] || 0,
+    "Actual Revenue": i <= ACTUALS_THRU ? (live26[i].rev || 0) : null,
+    "Budget Revenue": PLAN_2026.rev[i] || 0,
+    "Actual Expenses": i <= ACTUALS_THRU ? (live26[i].exp || 0) : null,
+    "Budget Expenses": PLAN_2026.exp[i] || 0,
+    "Actual Net Income": i <= ACTUALS_THRU ? (live26[i].ni || 0) : null,
+    "Budget Net Income": PLAN_2026.ni[i] || 0,
   }));
 
+  const ytdRev  = live26.slice(0, ACTUALS_THRU + 1).reduce((s, m) => s + m.rev, 0);
+  const ytdExp  = live26.slice(0, ACTUALS_THRU + 1).reduce((s, m) => s + m.exp, 0);
+  const ytdNI   = live26.slice(0, ACTUALS_THRU + 1).reduce((s, m) => s + m.ni, 0);
+  const ytdEBIT = live26.slice(0, ACTUALS_THRU + 1).reduce((s, m) => s + m.ebitda, 0);
+  const planYTDRev  = sum(PLAN_2026.rev.slice(0, ACTUALS_THRU + 1));
+  const planYTDExp  = sum(PLAN_2026.exp.slice(0, ACTUALS_THRU + 1));
+  const planYTDNI   = sum(PLAN_2026.ni.slice(0, ACTUALS_THRU + 1));
+  const planYTDEBIT = planYTDNI + sum(PLAN_2026.da.slice(0, ACTUALS_THRU + 1));
+
   const metricCards = [
-    { label: "Revenue – YTD Actual", val: sum(k26.rev.slice(0, ACTUALS_THRU + 1)), bud: sum(k26.rev.slice(0, ACTUALS_THRU + 1)) * 0.95 },
-    { label: "Expenses – YTD Actual", val: sum(k26.exp.slice(0, ACTUALS_THRU + 1)), bud: sum(k26.exp.slice(0, ACTUALS_THRU + 1)) * 1.03 },
-    { label: "Net Income – YTD Actual", val: sum(k26.ni.slice(0, ACTUALS_THRU + 1)), bud: sum(k26.ni.slice(0, ACTUALS_THRU + 1)) * 0.9 },
-    { label: "EBITDA – YTD Actual", val: sum(k26.ebitda.slice(0, ACTUALS_THRU + 1)), bud: sum(k26.ebitda.slice(0, ACTUALS_THRU + 1)) * 0.92 },
+    { label: "Revenue – YTD Actual", val: ytdRev, bud: planYTDRev },
+    { label: "Expenses – YTD Actual", val: ytdExp, bud: planYTDExp },
+    { label: "Net Income – YTD Actual", val: ytdNI, bud: planYTDNI },
+    { label: "EBITDA – YTD Actual", val: ytdEBIT, bud: planYTDEBIT },
   ];
 
   return (
@@ -1487,13 +1543,16 @@ function AvBSummary() {
 }
 
 // ─── Page: Actuals vs Budget – Detail ────────────────────────────────────────
-function AvBDetail() {
+function AvBDetail({ projOverrides, approvedItems, rolledItems }) {
   const C = useC();
   const [selMonth, setSelMonth] = useState(0); // default Jan
   const [varModal, setVarModal] = useState(null);
 
   const isAct = selMonth <= ACTUALS_THRU;
-  const k26 = KPIS_ALL["2026"];
+  const live26 = useMemo(() =>
+    computeLiveKPIs(2026, projOverrides, approvedItems, rolledItems),
+    [projOverrides, approvedItems, rolledItems]
+  );
 
   const detailRows = useMemo(() => {
     return UNIFIED_PL.filter(r => {
@@ -1533,9 +1592,9 @@ function AvBDetail() {
       {/* Top-line variance for month */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         {[
-          { label: "Revenue", actual: k26.rev[selMonth], budget: k26.rev[selMonth] * 0.95 },
-          { label: "Expenses", actual: k26.exp[selMonth], budget: k26.exp[selMonth] * 1.03 },
-          { label: "Net Income", actual: k26.ni[selMonth], budget: k26.ni[selMonth] * 0.9 },
+          { label: "Revenue", actual: live26[selMonth].rev, budget: PLAN_2026.rev[selMonth] || 0 },
+          { label: "Expenses", actual: live26[selMonth].exp, budget: PLAN_2026.exp[selMonth] || 0 },
+          { label: "Net Income", actual: live26[selMonth].ni, budget: PLAN_2026.ni[selMonth] || 0 },
         ].map(({ label, actual, budget }) => {
           const variance = actual - budget;
           const vPct = budget ? variance / Math.abs(budget) : 0;
@@ -2374,23 +2433,10 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
   const C = useC();
   const [year, setYear] = useState(2026);
 
-  // Base EBITDA from KPIS_ALL (actual + projected)
+  // Base EBITDA from live formula engine (actual + projected months)
   const baseEbitda = useMemo(() => {
-    const k = KPIS_ALL[String(year)];
-    if (!k) return Array(12).fill(0);
-    return k.ebitda.map((v, i) => {
-      if (isActualMonth(year, i)) return v;
-      // For projected months, recompute from projections
-      const revRows = UNIFIED_PL.map((r, idx) => ({ ...r, _idx: idx })).filter(r => r.type === "revenue" && isLeafGL(r.a));
-      const rev = revRows.reduce((s, r) => s + computeEffective(r._idx, year, i, projOverrides, approvedItems, rolledItems), 0);
-      const expRows = UNIFIED_PL.map((r, idx) => ({ ...r, _idx: idx })).filter(r => r.type === "expense" && isLeafGL(r.a));
-      const exp = expRows.reduce((s, r) => s + computeEffective(r._idx, year, i, projOverrides, approvedItems, rolledItems), 0);
-      const cogsRows = UNIFIED_PL.map((r, idx) => ({ ...r, _idx: idx })).filter(r => r.type === "cogs" && isLeafGL(r.a));
-      const cogs = cogsRows.reduce((s, r) => s + computeEffective(r._idx, year, i, projOverrides, approvedItems, rolledItems), 0);
-      const daRow = UNIFIED_PL.find(r => r.a === "Total Other Expenses" || r.a.includes("Depreciation"));
-      const da = daRow ? (getRowData(daRow, year)?.[i] ?? PLAN_2026.da[i] ?? 0) : (PLAN_2026.da[i] ?? 0);
-      return (rev - cogs - exp) + da;
-    });
+    const monthly = computeLiveKPIs(year, projOverrides, approvedItems, rolledItems);
+    return monthly.map(m => m.ebitda);
   }, [year, projOverrides, approvedItems, rolledItems]);
 
   // Adj items: scenario items that affect EBITDA + manual overrides
@@ -2532,8 +2578,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
             </thead>
             <tbody>
               {MONTHS.map((m, i) => {
-                const k = KPIS_ALL[String(year)];
-                const rev = k ? k.rev[i] : 0;
+                const rev = computeEffective(LIVE_KPI_ROWS.rev, year, i, projOverrides, approvedItems, rolledItems);
                 const margin = rev ? adjEbitda[i] / rev : 0;
                 const isActual = isActualMonth(year, i);
                 return (
@@ -2560,7 +2605,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
                 <td style={{ padding: "8px 12px", textAlign: "right", color: totalAdj >= 0 ? C.actual : C.negative, fontWeight: 700 }}>{fmt(totalAdj)}</td>
                 {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{planEbitda ? fmt(planEbitda.reduce((s,v)=>s+v,0)) : "—"}</td>}
                 <td style={{ padding: "8px 12px", textAlign: "right" }}>
-                  {(() => { const k = KPIS_ALL[String(year)]; const rev = k ? k.rev.reduce((s,v)=>s+v,0) : 0; const m = rev ? totalAdj/rev : 0; return <span style={{ color: m>=0.15?C.positive:m>=0?C.actual:C.negative }}>{(m*100).toFixed(1)}%</span>; })()}
+                  {(() => { const rev = Array.from({length:12},(_,i)=>computeEffective(LIVE_KPI_ROWS.rev,year,i,projOverrides,approvedItems,rolledItems)).reduce((s,v)=>s+v,0); const m = rev ? totalAdj/rev : 0; return <span style={{ color: m>=0.15?C.positive:m>=0?C.actual:C.negative }}>{(m*100).toFixed(1)}%</span>; })()}
                 </td>
               </tr>
             </tbody>
@@ -2688,19 +2733,10 @@ export default function App() {
         </div>
 
         {/* Page content */}
-        {page === "dashboard" && <Dashboard onNav={handleNav} />}
+        {page === "dashboard" && <Dashboard onNav={handleNav} projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "rev-vs-plan" && <RevVsPlan projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "fullpl" && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} rolledItems={rolledItems} />}
         {page === "projections" && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
-        {page === "avb-summary" && <AvBSummary />}
-        {page === "avb-detail" && <AvBDetail />}
-        {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} rolledItems={rolledItems} setRolledItems={setRolledItems} />}
-        {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} rolledItems={rolledItems} />}
-      </main>
-      {/* Floating AI Chat Widget */}
-      <FCAAssistant />
-    </div>
-    </>
-    </ThemeCtx.Provider>
-  );
-}
+        {page === "avb-summary" && <AvBSummary projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "avb-detail" && <AvBDetail projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprov
