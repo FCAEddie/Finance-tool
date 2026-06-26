@@ -7,11 +7,12 @@ import {
   LineChart, Line, BarChart, Bar, ComposedChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
 } from "recharts";
+import { QB_TRANSACTIONS, QB_LAST_SYNC, QB_SUMMARY } from "./transactions-data.js";
 import {
   LayoutDashboard, TableProperties, TrendingUp, BarChart2,
   ChevronDown, ChevronRight, Upload, Plus, Pencil, Trash2,
   X, CheckCircle, AlertCircle, Info, ArrowUpRight, ArrowDownRight,
-  FileText, Settings, Download, Sliders, MessageCircle, Send,
+  FileText, Settings, Download, Sliders, Receipt, MessageCircle, Send,
   Sun, Moon, Bell
 } from "lucide-react";
 
@@ -610,13 +611,49 @@ function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
     { label: "Adj. EBITDA",        value: ytdEbitda, delta: pctVsPlan(ytdEbitda, ytdPlanEbitda)   },
   ];
 
+  // D&A from PLAN_2026 as proxy for actuals
+  const ytdDA      = ytdPlanDA;
+  const fyDA       = fyPlanDA;
+  // Income Tax: EBIT - NI  (EBIT = EBITDA - DA)
+  const ytdTax     = Math.max(0, (ytdEbitda - ytdDA) - ytdNI);
+  const ytdPlanTax = Math.max(0, (ytdPlanEbitda - ytdPlanDA) - ytdPlanNI);
+  const fyTax      = Math.max(0, (fyEbitda - fyDA) - fyNI);
+  const fyPlanTax  = Math.max(0, (fyPlanEbitda - fyPlanDA) - fyPlanNI);
+  // Adj EBITDA addbacks from approved/rolled scenarios
+  const ytdAddback = (approvedItems || []).concat(rolledItems || [])
+    .reduce((s, it) => s + ((it.annualCost || 0) / 12) * (ACTUALS_THRU + 1), 0);
+  const fyAddback  = (approvedItems || []).concat(rolledItems || [])
+    .reduce((s, it) => s + (it.annualCost || 0), 0);
+  const ytdAdjEbitda = ytdEbitda + ytdAddback;
+  const fyAdjEbitda  = fyEbitda  + fyAddback;
+  const ytdPlanAdjEbitda = ytdPlanEbitda;
+  const fyPlanAdjEbitda  = fyPlanEbitda;
+  // FCF = Adj EBITDA * 0.72 (standard cash conversion estimate)
+  const ytdFCF     = ytdAdjEbitda * 0.72;
+  const fyFCF      = fyAdjEbitda  * 0.72;
+  const ytdPlanFCF = ytdPlanAdjEbitda * 0.72;
+  const fyPlanFCF  = fyPlanAdjEbitda  * 0.72;
+
+  const mgn = (a, rev) => rev ? ((a / rev) * 100).toFixed(1) + "%" : "—";
+
+  // row types: "val" = dollar, "mgn" = margin %, "sub" = highlighted dollar, "section" = gray label
   const snapshotRows = [
-    { name: "Total Revenue",      a: ytdRev,    p: ytdPlanRev,    fy: fyRev,    highlight: false },
-    { name: "Cost of Sales",      a: ytdCogs,   p: ytdPlanCogs,   fy: fyCogs,   highlight: false },
-    { name: "Gross Profit",       a: ytdGP,     p: ytdPlanGP,     fy: fyGP,     highlight: true  },
-    { name: "Operating Expenses", a: ytdOpex,   p: ytdPlanExp,    fy: fyOpex,   highlight: false },
-    { name: "EBITDA",             a: ytdEbitda, p: ytdPlanEbitda, fy: fyEbitda, highlight: true  },
-    { name: "Net Income",         a: ytdNI,     p: ytdPlanNI,     fy: fyNI,     highlight: false },
+    { name: "Revenue",                   a: ytdRev,         p: ytdPlanRev,         fy: fyRev,         kind: "val"  },
+    { name: "COGS",                      a: ytdCogs,        p: ytdPlanCogs,        fy: fyCogs,        kind: "val"  },
+    { name: "Gross Profit",              a: ytdGP,          p: ytdPlanGP,          fy: fyGP,          kind: "sub"  },
+    { name: "Gross Profit Margin",       a: ytdGP/ytdRev,   p: ytdPlanGP/ytdPlanRev, fy: fyGP/fyRev,  kind: "mgn"  },
+    { name: "Expenses",                  a: ytdOpex,        p: ytdPlanExp,         fy: fyOpex,        kind: "val"  },
+    { name: "Income Tax",                a: ytdTax,         p: ytdPlanTax,         fy: fyTax,         kind: "val"  },
+    { name: "D&A",                       a: ytdDA,          p: ytdPlanDA,          fy: fyDA,          kind: "val"  },
+    { name: "Net Income",                a: ytdNI,          p: ytdPlanNI,          fy: fyNI,          kind: "sub"  },
+    { name: "Net Income Margin",         a: ytdNI/ytdRev,   p: ytdPlanNI/ytdPlanRev, fy: fyNI/fyRev,  kind: "mgn"  },
+    { name: "EBITDA",                    a: ytdEbitda,      p: ytdPlanEbitda,      fy: fyEbitda,      kind: "sub"  },
+    { name: "EBITDA Margin",             a: ytdEbitda/ytdRev, p: ytdPlanEbitda/ytdPlanRev, fy: fyEbitda/fyRev, kind: "mgn" },
+    { name: "Adj. EBITDA Add-backs",     a: ytdAddback,     p: 0,                  fy: fyAddback,     kind: "val"  },
+    { name: "Adjusted EBITDA",           a: ytdAdjEbitda,   p: ytdPlanAdjEbitda,   fy: fyAdjEbitda,   kind: "sub"  },
+    { name: "Adj. EBITDA Margin",        a: ytdAdjEbitda/ytdRev, p: ytdPlanAdjEbitda/ytdPlanRev, fy: fyAdjEbitda/fyRev, kind: "mgn" },
+    { name: "FCF (Free Cash Flow)",      a: ytdFCF,         p: ytdPlanFCF,         fy: fyFCF,         kind: "val"  },
+    { name: "FCF Margin",                a: ytdFCF/ytdRev,  p: ytdPlanFCF/ytdPlanRev, fy: fyFCF/fyRev, kind: "mgn" },
   ];
 
   const revChartData = MONTHS.map((m, i) => ({
@@ -753,20 +790,27 @@ function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
           <span style={{ textAlign:"right" }}>FY Forecast</span>
         </div>
         {snapshotRows.map(r => {
+          const isMgn = r.kind === "mgn";
+          const isSub = r.kind === "sub";
+          const fmtV  = (v) => isMgn ? (isNaN(v)||!isFinite(v) ? "—" : (v*100).toFixed(1)+"%") : fmt(v);
           const variance = r.a - r.p;
+          const varFmt = isMgn
+            ? (isNaN(variance)||!isFinite(variance) ? "—" : (variance>=0?"+":"") + (variance*100).toFixed(1)+"pts")
+            : ((variance>=0?"+":"") + fmt(variance));
           const isPos = variance >= 0;
           return (
             <div key={r.name} style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",
-              padding:"11px 8px", borderBottom:`1px solid ${C.cardBorder}`,
-              background: r.highlight ? C.totalBg : "transparent",
-              fontSize:13.5, color:C.actual, alignItems:"center" }}>
-              <span style={{ fontWeight: r.highlight ? 700 : 400 }}>{r.name}</span>
-              <span style={{ textAlign:"right", fontWeight:600 }}>{fmt(r.a)}</span>
-              <span style={{ textAlign:"right", color:C.textDim }}>{fmt(r.p)}</span>
-              <span style={{ textAlign:"right", fontWeight:600, color: isPos ? C.positive : C.negative }}>
-                {variance>=0?"+":""}{fmt(variance)}
+              padding: isMgn ? "5px 8px 6px 20px" : "11px 8px",
+              borderBottom:`1px solid ${C.cardBorder}`,
+              background: isSub ? C.totalBg : "transparent",
+              fontSize: isMgn ? 12 : 13.5, color: isMgn ? C.textDim : C.actual, alignItems:"center" }}>
+              <span style={{ fontWeight: isSub ? 700 : 400, fontStyle: isMgn ? "italic" : "normal" }}>{r.name}</span>
+              <span style={{ textAlign:"right", fontWeight: isSub ? 700 : 400 }}>{fmtV(r.a)}</span>
+              <span style={{ textAlign:"right", color:C.textDim }}>{fmtV(r.p)}</span>
+              <span style={{ textAlign:"right", fontWeight: isSub ? 700 : 400, color: isPos ? C.positive : C.negative }}>
+                {varFmt}
               </span>
-              <span style={{ textAlign:"right", color:C.textDim }}>{fmt(r.fy)}</span>
+              <span style={{ textAlign:"right", color:C.textDim }}>{fmtV(r.fy)}</span>
             </div>
           );
         })}
@@ -783,6 +827,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
   const [modal, setModal] = useState(null);
   const [editingCell, setEditingCell] = useState(null);
   const [rollForwardPrompt, setRollForwardPrompt] = useState(null);
+  const [plView, setPlView] = useState('consolidated'); // 'consolidated' | 'by-source'
 
   const applyRollForward = (scope) => {
     if (!rollForwardPrompt) return;
@@ -872,6 +917,16 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Full P&L</h2>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Source toggle */}
+          <div style={{ display:"flex", border:`1px solid ${C.cardBorder}`, borderRadius:8, overflow:"hidden", marginRight:4 }}>
+            {[['consolidated','Consolidated'],['by-source','Legacy · Freedom']].map(([mode,label]) => (
+              <button key={mode} onClick={() => setPlView(mode)}
+                style={{ padding:"6px 14px", border:"none", background: plView===mode ? C.accent : "transparent",
+                  color: plView===mode ? "#fff" : C.textDim, cursor:"pointer", fontSize:12, fontWeight:600, transition:"all .15s" }}>
+                {label}
+              </button>
+            ))}
+          </div>
           {YEARS.map(yr => (
             <button key={yr} onClick={() => setYear(yr)}
               style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${year === yr ? C.accent : C.cardBorder}`,
@@ -894,6 +949,113 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
         Click any cell to see detail
       </div>
 
+      {/* ── By-Source Split View ──────────────────────────────────────── */}
+      {plView === 'by-source' && (() => {
+        const activeMos = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const revRows = UNIFIED_PL.filter(r => r.i === 1 && r.type === "revenue" && !r.a.startsWith("Total"));
+        const expRows = UNIFIED_PL.filter(r => r.i === 1 && r.type === "expense" && !r.a.startsWith("Total"));
+
+        const getMonthly = (rows) => activeMos.map((_, mi) =>
+          rows.reduce((s, r) => s + (computeEffective(r, year, mi, projOverrides, approvedItems, rolledItems) || 0), 0)
+        );
+        const revMo = getMonthly(revRows);
+        const expMo = getMonthly(expRows);
+        const gpMo  = revMo.map((v, i) => v - expMo[i]);
+        const ytd = arr => arr.slice(0, year === 2026 ? ACTUALS_THRU + 1 : 12).reduce((s,v)=>s+v,0);
+        const fyt = arr => arr.reduce((s,v)=>s+v,0);
+
+        const thS = { padding:"9px 10px", textAlign:"right", fontSize:11, fontWeight:700,
+          textTransform:"uppercase", letterSpacing:".4px", color:C.textDim,
+          borderBottom:`2px solid ${C.cardBorder}`, background:C.card, whiteSpace:"nowrap" };
+        const tdR = (bold) => ({ padding:"8px 10px", textAlign:"right", fontSize:13,
+          fontWeight:bold?700:400, color:C.actual, borderBottom:`1px solid ${C.cardBorder}` });
+        const tdL = (indent, bold) => ({ padding:`8px 10px 8px ${10+indent*14}px`, fontSize:13,
+          fontWeight:bold?700:400, color:bold?C.actual:C.textDim, borderBottom:`1px solid ${C.cardBorder}` });
+
+        const Band = ({ label, color, sub }) => (
+          <tr>
+            <td colSpan={activeMos.length + (year===2026?3:2)}
+              style={{ padding:"9px 14px", background:color }}>
+              <span style={{ fontWeight:700, fontSize:13, color:"#fff" }}>{label}</span>
+              {sub && <span style={{ fontSize:11, color:"rgba(255,255,255,.65)", marginLeft:8 }}>{sub}</span>}
+            </td>
+          </tr>
+        );
+
+        const DataRow = ({ row }) => {
+          const vals = activeMos.map((_, mi) => computeEffective(row, year, mi, projOverrides, approvedItems, rolledItems) || 0);
+          return (
+            <tr>
+              <td style={tdL(1, false)}>{displayLabel(row.a)}</td>
+              {year===2026 && <td style={tdR(false)}>{fmt(ytd(vals))}</td>}
+              {vals.map((v,i) => <td key={i} style={tdR(false)}>{fmt(v)}</td>)}
+              <td style={tdR(false)}>{fmt(fyt(vals))}</td>
+            </tr>
+          );
+        };
+
+        const TotRow = ({ label, arr, grand }) => {
+          const bg = grand ? C.accent : C.totalBg;
+          const fg = grand ? "#fff" : C.actual;
+          const bdr = `2px solid ${C.cardBorder}`;
+          return (
+            <tr style={{ background:bg }}>
+              <td style={{ padding:"10px 10px", fontWeight:700, fontSize:13, color:fg, borderTop:bdr }}>{label}</td>
+              {year===2026 && <td style={{ padding:"10px 10px", textAlign:"right", fontWeight:700, color:fg, borderTop:bdr }}>{fmt(ytd(arr))}</td>}
+              {arr.map((v,i) => <td key={i} style={{ padding:"10px 10px", textAlign:"right", fontWeight:700, color:fg, borderTop:bdr }}>{fmt(v)}</td>)}
+              <td style={{ padding:"10px 10px", textAlign:"right", fontWeight:700, color:fg, borderTop:bdr }}>{fmt(fyt(arr))}</td>
+            </tr>
+          );
+        };
+
+        const MgnRow = ({ label, num, den }) => {
+          const vals = num.map((v,i) => den[i] ? (v/den[i]*100).toFixed(1)+"%" : "—");
+          const ytdV = ytd(den) ? (ytd(num)/ytd(den)*100).toFixed(1)+"%" : "—";
+          const fyV  = fyt(den) ? (fyt(num)/fyt(den)*100).toFixed(1)+"%" : "—";
+          return (
+            <tr>
+              <td style={{ ...tdL(2,false), fontStyle:"italic", fontSize:12, color:C.textDim }}>{label}</td>
+              {year===2026 && <td style={{ padding:"5px 10px", textAlign:"right", fontSize:12, color:C.textDim, borderBottom:`1px solid ${C.cardBorder}` }}>{ytdV}</td>}
+              {vals.map((v,i) => <td key={i} style={{ padding:"5px 10px", textAlign:"right", fontSize:12, color:C.textDim, borderBottom:`1px solid ${C.cardBorder}` }}>{v}</td>)}
+              <td style={{ padding:"5px 10px", textAlign:"right", fontSize:12, color:C.textDim, borderBottom:`1px solid ${C.cardBorder}` }}>{fyV}</td>
+            </tr>
+          );
+        };
+
+        return (
+          <div style={{ overflowX:"auto", borderRadius:10, border:`1px solid ${C.cardBorder}`, background:C.card, boxShadow:C.shadow }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", minWidth:900 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thS, textAlign:"left", minWidth:220 }}>Line Item</th>
+                  {year===2026 && <th style={{ ...thS, background:C.accentSoft, color:C.accent }}>YTD</th>}
+                  {activeMos.map(m => <th key={m} style={thS}>{m}</th>)}
+                  <th style={thS}>FY Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <Band label="Freedom QB" color="#0B5CAB" sub="Revenue" />
+                {revRows.map(r => <DataRow key={r.a} row={r} />)}
+                <TotRow label="Total Revenue" arr={revMo} />
+                <MgnRow label="Revenue mix shown above" num={revMo} den={revMo} />
+
+                <Band label="Legacy QB" color="#92400E" sub="COGS · Operating Expenses" />
+                {expRows.map(r => <DataRow key={r.a} row={r} />)}
+                <TotRow label="Total COGS + Expenses" arr={expMo} />
+
+                <Band label="Consolidated" color="#032D60" sub="Net of both accounts" />
+                <TotRow label="Gross Profit" arr={gpMo} />
+                <MgnRow label="Gross Margin %" num={gpMo} den={revMo} />
+                <TotRow label="Net Income" arr={gpMo} grand />
+                <MgnRow label="Net Margin %" num={gpMo} den={revMo} />
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
+      {/* ── Consolidated Full P&L ────────────────────────────────────────── */}
+      {plView === 'consolidated' && <>
       {/* Table */}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -1003,6 +1165,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
           </table>
         </div>
       </Card>
+      </> }
 
       {/* Roll Forward Prompt */}
       {rollForwardPrompt && (
@@ -2566,7 +2729,205 @@ const WISH_LIST = [
 ];
 
 // ─── App ──────────────────────────────────────────────────────────────────────
-export default function App() {
+export default // ─── Transactions ────────────────────────────────────────────────────────────
+function Transactions() {
+  const C = useC();
+  const [search, setSearch] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState("all");
+  const [sourceFilter, setSourceFilter] = React.useState("all");
+  const [statusFilter, setStatusFilter] = React.useState("all");
+  const [sortKey, setSortKey] = React.useState("date");
+  const [sortDir, setSortDir] = React.useState("desc");
+  const [page, setPage] = React.useState(0);
+  const PAGE_SIZE = 50;
+
+  const txns = QB_TRANSACTIONS || [];
+  const lastSync = QB_LAST_SYNC || {};
+  const summary = QB_SUMMARY || {};
+
+  const filtered = React.useMemo(() => {
+    let r = txns;
+    if (search) {
+      const s = search.toLowerCase();
+      r = r.filter(t => (t.customer||"").toLowerCase().includes(s) || (t.ref||"").toLowerCase().includes(s) || (t.lines||[]).some(l => (l.desc||"").toLowerCase().includes(s)));
+    }
+    if (typeFilter !== "all") r = r.filter(t => t.type === typeFilter);
+    if (sourceFilter !== "all") r = r.filter(t => t.source === sourceFilter);
+    if (statusFilter === "unpaid") r = r.filter(t => !t.paid);
+    if (statusFilter === "paid") r = r.filter(t => t.paid);
+    r = [...r].sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (sortKey === "amount" || sortKey === "balance") { av = parseFloat(av)||0; bv = parseFloat(bv)||0; }
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return r;
+  }, [txns, search, typeFilter, sourceFilter, statusFilter, sortKey, sortDir]);
+
+  const pages = Math.ceil(filtered.length / PAGE_SIZE);
+  const visible = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  const totalAmt = filtered.reduce((s, t) => s + (parseFloat(t.amount)||0), 0);
+  const unpaidAmt = filtered.filter(t => !t.paid).reduce((s, t) => s + (parseFloat(t.balance)||0), 0);
+
+  const sort = (key) => { if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc"); else { setSortKey(key); setSortDir("desc"); } setPage(0); };
+  const SortIcon = ({ k }) => sortKey === k ? (sortDir === "asc" ? " ▲" : " ▼") : " ⇅";
+
+  const thS = { padding:"9px 12px", textAlign:"left", fontSize:11, fontWeight:700, textTransform:"uppercase",
+    letterSpacing:".4px", color:C.textDim, borderBottom:`2px solid ${C.cardBorder}`, background:C.card,
+    cursor:"pointer", whiteSpace:"nowrap", userSelect:"none" };
+  const tdS = { padding:"9px 12px", fontSize:13, color:C.actual, borderBottom:`1px solid ${C.cardBorder}` };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+        <h2 style={{ color:C.actual, margin:0, fontSize:20, fontWeight:700 }}>Transactions</h2>
+        <div style={{ fontSize:11, color:C.textDim, background:C.accentSoft, padding:"3px 10px", borderRadius:20 }}>
+          {txns.length.toLocaleString()} records
+        </div>
+        <div style={{ marginLeft:"auto", fontSize:11, color:C.textDim }}>
+          {lastSync.freedom && <span>Freedom QB synced {lastSync.freedom}</span>}
+          {lastSync.legacy && <span style={{ marginLeft:10 }}>· Legacy QB synced {lastSync.legacy}</span>}
+          {!lastSync.freedom && !lastSync.legacy && <span>Not yet synced from QuickBooks</span>}
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
+        {[
+          { label:"Total Records", val: txns.length.toLocaleString(), sub: "all time" },
+          { label:"Filtered Records", val: filtered.length.toLocaleString(), sub: "matching filters" },
+          { label:"Total Amount", val: fmt(totalAmt), sub: "filtered" },
+          { label:"Outstanding Balance", val: fmt(unpaidAmt), sub: "unpaid/filtered", warn: unpaidAmt > 0 },
+        ].map(c => (
+          <div key={c.label} style={{ background:C.card, borderRadius:10, padding:"16px 18px",
+            border:`1px solid ${C.cardBorder}`, boxShadow:C.shadow }}>
+            <div style={{ fontSize:11, textTransform:"uppercase", letterSpacing:".5px", color:C.textDim, marginBottom:4 }}>{c.label}</div>
+            <div style={{ fontSize:20, fontWeight:700, color: c.warn ? C.negative : C.actual }}>{c.val}</div>
+            <div style={{ fontSize:11, color:C.textDim, marginTop:2 }}>{c.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div style={{ background:C.card, borderRadius:10, padding:"14px 16px", border:`1px solid ${C.cardBorder}`,
+        display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+        <input value={search} onChange={e=>{setSearch(e.target.value);setPage(0);}}
+          placeholder="Search customer, ref #, description…"
+          style={{ flex:"1 1 240px", padding:"7px 12px", borderRadius:7, border:`1px solid ${C.cardBorder}`,
+            background:C.bg, color:C.actual, fontSize:13, outline:"none" }} />
+        {[
+          { val:typeFilter, set:v=>{setTypeFilter(v);setPage(0);}, opts:[["all","All Types"],["invoice","Invoice"],["bill","Bill"]] },
+          { val:sourceFilter, set:v=>{setSourceFilter(v);setPage(0);}, opts:[["all","All Sources"],["freedom","Freedom QB"],["legacy","Legacy QB"]] },
+          { val:statusFilter, set:v=>{setStatusFilter(v);setPage(0);}, opts:[["all","All Status"],["paid","Paid"],["unpaid","Unpaid"]] },
+        ].map((f, i) => (
+          <select key={i} value={f.val} onChange={e=>f.set(e.target.value)}
+            style={{ padding:"7px 10px", borderRadius:7, border:`1px solid ${C.cardBorder}`,
+              background:C.bg, color:C.actual, fontSize:13, outline:"none", cursor:"pointer" }}>
+            {f.opts.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        ))}
+        {(search || typeFilter !== "all" || sourceFilter !== "all" || statusFilter !== "all") && (
+          <button onClick={()=>{setSearch("");setTypeFilter("all");setSourceFilter("all");setStatusFilter("all");setPage(0);}}
+            style={{ padding:"7px 12px", borderRadius:7, border:`1px solid ${C.cardBorder}`,
+              background:"transparent", color:C.textDim, fontSize:12, cursor:"pointer" }}>
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Table */}
+      <div style={{ background:C.card, borderRadius:10, border:`1px solid ${C.cardBorder}`,
+        boxShadow:C.shadow, overflow:"hidden" }}>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", minWidth:780 }}>
+            <thead>
+              <tr>
+                <th style={thS} onClick={()=>sort("date")}>Date<SortIcon k="date"/></th>
+                <th style={thS} onClick={()=>sort("ref")}>Ref #<SortIcon k="ref"/></th>
+                <th style={thS} onClick={()=>sort("type")}>Type<SortIcon k="type"/></th>
+                <th style={{ ...thS, width:"25%" }} onClick={()=>sort("customer")}>Customer / Vendor<SortIcon k="customer"/></th>
+                <th style={{ ...thS, textAlign:"right" }} onClick={()=>sort("amount")}>Amount<SortIcon k="amount"/></th>
+                <th style={{ ...thS, textAlign:"right" }} onClick={()=>sort("balance")}>Balance<SortIcon k="balance"/></th>
+                <th style={thS}>Source</th>
+                <th style={thS}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.length === 0 && (
+                <tr><td colSpan={8} style={{ ...tdS, textAlign:"center", color:C.textDim, padding:32 }}>
+                  No transactions match the current filters.
+                </td></tr>
+              )}
+              {visible.map((t, i) => (
+                <tr key={t.id || i} style={{ cursor:"default" }}
+                  onMouseEnter={e=>e.currentTarget.style.background=C.projBg}
+                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <td style={tdS}>{t.date}</td>
+                  <td style={{ ...tdS, fontWeight:600, color:C.accent }}>{t.ref || "—"}</td>
+                  <td style={tdS}>
+                    <span style={{ display:"inline-block", padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:600,
+                      background: t.type==="invoice" ? C.accentSoft : "rgba(146,64,14,0.1)",
+                      color: t.type==="invoice" ? C.accent : "#92400E" }}>
+                      {t.type}
+                    </span>
+                  </td>
+                  <td style={{ ...tdS, maxWidth:240, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}
+                    title={t.customer}>{t.customer || "—"}</td>
+                  <td style={{ ...tdS, textAlign:"right", fontWeight:600 }}>{fmt(parseFloat(t.amount)||0)}</td>
+                  <td style={{ ...tdS, textAlign:"right", color: parseFloat(t.balance||0) > 0 ? C.negative : C.positive }}>
+                    {fmt(parseFloat(t.balance)||0)}
+                  </td>
+                  <td style={tdS}>
+                    <span style={{ display:"inline-block", padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:600,
+                      background: t.source==="freedom" ? "#E3F1E8" : "#FFF3CD",
+                      color: t.source==="freedom" ? "#2E844A" : "#7A5800" }}>
+                      {t.source === "freedom" ? "Freedom" : "Legacy"}
+                    </span>
+                  </td>
+                  <td style={tdS}>
+                    <span style={{ display:"inline-block", padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:600,
+                      background: t.paid ? C.positiveSoft : C.negativeSoft,
+                      color: t.paid ? C.positive : C.negative }}>
+                      {t.paid ? "Paid" : "Unpaid"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        {pages > 1 && (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px",
+            borderTop:`1px solid ${C.cardBorder}`, background:C.card }}>
+            <span style={{ fontSize:12, color:C.textDim }}>
+              Showing {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, filtered.length)} of {filtered.length.toLocaleString()}
+            </span>
+            <div style={{ display:"flex", gap:6 }}>
+              <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0}
+                style={{ padding:"5px 12px", borderRadius:6, border:`1px solid ${C.cardBorder}`,
+                  background:"transparent", color: page===0 ? C.textDim : C.actual, cursor: page===0?"default":"pointer", fontSize:12 }}>
+                ← Prev
+              </button>
+              <span style={{ padding:"5px 10px", fontSize:12, color:C.textDim }}>{page+1} / {pages}</span>
+              <button onClick={()=>setPage(p=>Math.min(pages-1,p+1))} disabled={page===pages-1}
+                style={{ padding:"5px 12px", borderRadius:6, border:`1px solid ${C.cardBorder}`,
+                  background:"transparent", color: page===pages-1 ? C.textDim : C.actual, cursor: page===pages-1?"default":"pointer", fontSize:12 }}>
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [fontSize, setFontSize] = useState("md");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -2589,7 +2950,8 @@ export default function App() {
     { id: "fullpl",      label: "Full P&L",            icon: TableProperties },
     { id: "projections", label: "Projections",         icon: TrendingUp },
     { id: "scenarios",   label: "Scenarios",           icon: Sliders },
-    { id: "adj-ebitda",  label: "Adj. EBITDA",         icon: TrendingUp },
+    { id: "adj-ebitda",    label: "Adj. EBITDA",         icon: TrendingUp },
+  { id: "transactions",  label: "Transactions",         icon: Receipt },
   ];
 
   return (
@@ -2741,6 +3103,7 @@ export default function App() {
         {page === "fullpl" && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} rolledItems={rolledItems} />}
         {page === "projections" && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-summary" && <AvBSummary projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "transactions" && <Transactions />}
         {page === "avb-detail" && <AvBDetail projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} rolledItems={rolledItems} setRolledItems={setRolledItems} />}
         {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} rolledItems={rolledItems} />}
