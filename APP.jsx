@@ -628,11 +628,11 @@ function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
   const fyAdjEbitda  = fyEbitda  + fyAddback;
   const ytdPlanAdjEbitda = ytdPlanEbitda;
   const fyPlanAdjEbitda  = fyPlanEbitda;
-  // FCF = Adj EBITDA * 0.72 (standard cash conversion estimate)
-  const ytdFCF     = ytdAdjEbitda * 0.72;
-  const fyFCF      = fyAdjEbitda  * 0.72;
-  const ytdPlanFCF = ytdPlanAdjEbitda * 0.72;
-  const fyPlanFCF  = fyPlanAdjEbitda  * 0.72;
+  // FCF = Net Income + D&A
+  const ytdFCF     = ytdNI     + ytdDA;
+  const fyFCF      = fyNI      + fyDA;
+  const ytdPlanFCF = ytdPlanNI + ytdPlanDA;
+  const fyPlanFCF  = fyPlanNI  + fyPlanDA;
 
   const mgn = (a, rev) => rev ? ((a / rev) * 100).toFixed(1) + "%" : "—";
 
@@ -1083,7 +1083,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
                 const rowTotal = vals ? sum(vals) : 0;
                 const isHead = isHeader(a);
                 const isTot = isTotal(a);
-                const hasChildren = UNIFIED_PL.some(r => r.i === i + 1 && !r.a.startsWith("Total"));
+                const hasChildren = !isTot && UNIFIED_PL.some(r => r.i === i + 1 && !r.a.startsWith("Total"));
                 const isExp = expanded.has(a);
 
                 return (
@@ -2406,12 +2406,17 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
             <tbody>
               {(wishList || WISH_LIST).map(item => {
                 const isActive = checked.has(item.id);
-                const isUnplanned = item.status === "unplanned_ask";
+                const statusBg = {
+                  plan:     "rgba(249,115,22,0.12)",
+                  approved: "rgba(34,197,94,0.08)",
+                  rejected: "rgba(239,68,68,0.08)",
+                  pending:  "transparent",
+                }[item.status] || "transparent";
                 return (
                   <tr key={item.id}
                     style={{ borderBottom: `1px solid ${C.cardBorder}22`,
-                      background: isUnplanned ? "rgba(234,179,8,0.08)" : "transparent",
-                      opacity: isActive ? 1 : 0.5 }}
+                      background: statusBg,
+                      opacity: item.status === "rejected" ? 0.55 : isActive ? 1 : 0.65 }}
                     onClick={() => toggle(item.id)}>
                     <td style={{ padding: "8px 12px", textAlign: "center" }}>
                       <input type="checkbox" checked={isActive} onChange={() => toggle(item.id)}
@@ -2430,13 +2435,20 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                       {fmt(item.annualCost)}
                     </td>
                     <td style={{ padding: "8px 12px", textAlign: "center" }}>
-                      <span style={{
-                        padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600,
-                        background: isUnplanned ? "rgba(234,179,8,0.2)" : "rgba(34,197,94,0.15)",
-                        color: isUnplanned ? "#eab308" : C.positive
-                      }}>
-                        {isUnplanned ? "Unplanned Ask" : "Plan"}
-                      </span>
+                      {(() => {
+                        const badges = {
+                          plan:     { bg: "rgba(249,115,22,0.2)",  color: "#f97316", label: "In Projections" },
+                          approved: { bg: "rgba(34,197,94,0.15)",  color: "#22c55e", label: "Approved" },
+                          rejected: { bg: "rgba(239,68,68,0.15)",  color: "#f87171", label: "Rejected" },
+                          pending:  { bg: "rgba(148,163,184,0.15)", color: "#94a3b8", label: "Pending" },
+                        };
+                        const b = badges[item.status] || badges.pending;
+                        return (
+                          <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: b.bg, color: b.color }}>
+                            {b.label}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: "8px 12px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
@@ -2723,9 +2735,40 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
 
 // ─── Wish List constant (default data) ────────────────────────────────────────
 const WISH_LIST = [
-  { id: 1, name: "Salesforce CRM", glCode: "605100 Software", requester: "Sales", annualCost: 36000, startMonth: "Jan", startYear: "2026", endMonth: "Dec", endYear: "2028", status: "plan", notes: "Pipeline tracking" },
-  { id: 2, name: "Security Camera Upgrade", glCode: "803100 Equipment Sales", requester: "Operations", annualCost: 24000, startMonth: "Jun", startYear: "2026", endMonth: "Dec", endYear: "2027", status: "wish", notes: "Facility upgrade" },
-  { id: 3, name: "HR Platform (BambooHR)", glCode: "605100 Software", requester: "HR", annualCost: 18000, startMonth: "Mar", startYear: "2026", endMonth: "Dec", endYear: "2028", status: "plan", notes: "Headcount mgmt" },
+  // ── Orange: already approved & rolled into projections ──────────────────────
+  { id: 29, name: "CTO (Backfilling Rizzo)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Reid/Rizzo", priority: "Leadership", annualCost: 200000, startMonth: "Jul", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "plan", notes: "Modeling in $100K for now" },
+  { id: 30, name: "AI Consultant", glCode: "605200 Outside Services", requester: "Reid/Rizzo", priority: "Innovation", annualCost: 10000, startMonth: "Jun", startYear: 2026, endMonth: "Dec", endYear: 2026, status: "plan", notes: "Consultant for 4-6 weeks" },
+  { id: 31, name: "Claude - Seats", glCode: "605100 Software", requester: "Madigan/Rizzo", priority: "Keep Lights On", annualCost: 12800, startMonth: "Mar", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "plan", notes: "32 users @ $25/mo" },
+  { id: 32, name: "Claude - Token Usage", glCode: "605100 Software", requester: "Madigan/Rizzo", priority: "Keep Lights On", annualCost: 0, startMonth: "Apr", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "plan", notes: "TBD — one-time and not recurring" },
+  // ── Green: approved ─────────────────────────────────────────────────────────
+  { id: 2,  name: "HubSpot Renewal Uptick", glCode: "605100 Software", requester: "Caitlin", priority: "Keep Lights On", annualCost: 10000, startMonth: "Sep", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "done" },
+  { id: 3,  name: "AGC CA", glCode: "605200 Outside Services", requester: "Caitlin", priority: "Revenue Growth", annualCost: 5000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "done" },
+  { id: 4,  name: "Dialer Tool for BDRs", glCode: "605100 Software", requester: "Caitlin", priority: "Revenue Growth", annualCost: 5000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "done" },
+  { id: 7,  name: "Regional Account Executive (#1)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Caitlin", priority: "Revenue Growth", annualCost: 150000, startMonth: "Jun", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "Refine with variable. Approved. Pending hire." },
+  { id: 11, name: "Customer Facing Help/KB Platform", glCode: "605100 Software", requester: "Madigan/Rizzo", priority: "Keep Lights On", annualCost: 5000, startMonth: "Jul", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "Inline won't be solution. Exploring alternatives." },
+  { id: 12, name: "Replacement Aged/Dead Hardware", glCode: "606100 Equipment", requester: "Melanie", priority: "Keep Lights On", annualCost: 133000, startMonth: "Apr", startYear: 2026, endMonth: "Dec", endYear: 2026, status: "approved", notes: "Replace 2016 units" },
+  { id: 14, name: "Storefront Employee (uniforms, scrubs)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Melanie", priority: "Keep Lights On", annualCost: 7500, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "" },
+  { id: 15, name: "Staff Professional Development", glCode: "605300 Training", requester: "Team", priority: "Operations", annualCost: 10000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "" },
+  { id: 16, name: "FCA Bonus/Merit Pool (W2)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Team", priority: "Retention", annualCost: 500000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "CPI is 3%" },
+  { id: 17, name: "Crowdstrike Active Monitoring", glCode: "605100 Software", requester: "Rizzo (SecOps)", priority: "Security", annualCost: 44000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "done" },
+  { id: 18, name: "3rd Party AWS, DC & App Security Scanning", glCode: "605100 Software", requester: "Rizzo (SecOps)", priority: "Security", annualCost: 50000, startMonth: "Jul", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "Will coincide with next pen test in June/July" },
+  { id: 19, name: "Technology Team Training", glCode: "605300 Training", requester: "Rizzo (Product)", priority: "Keep Lights On", annualCost: 30000, startMonth: "May", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "Suggest to use this for Anton" },
+  { id: 20, name: "QA Analyst (#4)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Rizzo (Product)", priority: "Revenue Growth", annualCost: 40000, startMonth: "Jul", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "done" },
+  { id: 21, name: "QA Automation (#5)", glCode: "605100 Software", requester: "Rizzo (Product)", priority: "Revenue Growth", annualCost: 18000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "" },
+  { id: 22, name: "Visual Studio / Cursor Upgrade", glCode: "605100 Software", requester: "Rizzo (Product)", priority: "Keep Lights On", annualCost: 7500, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "done" },
+  { id: 23, name: "Secure Legacy Backup System", glCode: "605100 Software", requester: "Rizzo (SecOps)", priority: "Keep Lights On", annualCost: 75000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "approved", notes: "Includes $30K Windows license upgrades" },
+  // ── Red: rejected ───────────────────────────────────────────────────────────
+  { id: 5,  name: "BDR #2", glCode: "601000 Salaries and Other Payroll Exp", requester: "Caitlin", priority: "Revenue Growth", annualCost: 120000, startMonth: "Jun", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "rejected", notes: "Took different approach. Extended Memory Blue contract." },
+  { id: 6,  name: "T&E", glCode: "607100 Travel and Entertainment", requester: "Eddie", priority: "Operations", annualCost: 50000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "rejected", notes: "$300K in baseline — above threshold." },
+  { id: 8,  name: "Regional Account Executive (#2)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Caitlin", priority: "Revenue Growth", annualCost: 150000, startMonth: "Apr", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "rejected", notes: "No longer request for 2026. DELETE." },
+  { id: 10, name: "Full-Time Tech Writer (convert Courtney)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Madigan/Rizzo", priority: "Product", annualCost: 125000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "rejected", notes: "Tech writer for release notes, in-app guidance." },
+  { id: 13, name: "PayChex Document Storage (Upgrade)", glCode: "605100 Software", requester: "Team", priority: "Operations", annualCost: 2000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "rejected", notes: "" },
+  // ── White: pending ──────────────────────────────────────────────────────────
+  { id: 24, name: "Fractional CISO (8)", glCode: "605200 Outside Services", requester: "Rizzo (SecOps)", priority: "Security", annualCost: 120000, startMonth: "Jan", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "pending", notes: "Fractional Chief Info Security Officer" },
+  { id: 25, name: "Managed Service Provider (MSP)", glCode: "605200 Outside Services", requester: "Rizzo (SecOps)", priority: "Keep Lights On", annualCost: 108000, startMonth: "Mar", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "pending", notes: "Managing FCA's IT infrastructure" },
+  { id: 26, name: "QA Analyst (10)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Rizzo (Product)", priority: "Revenue Growth", annualCost: 70000, startMonth: "Sep", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "pending", notes: "" },
+  { id: 27, name: "Technical Operations Manager (US)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Rizzo (SecOps)", priority: "Operations", annualCost: 150000, startMonth: "Apr", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "pending", notes: "" },
+  { id: 28, name: "ISO 270001", glCode: "605200 Outside Services", requester: "Rizzo", priority: "Security", annualCost: 0, startMonth: "Jan", startYear: 2027, endMonth: "Dec", endYear: 2028, status: "pending", notes: "Will plan for 2027, no plan for 2026 expense." },
 ];
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -2928,7 +2971,7 @@ function Transactions() {
 }
 
 function App() {
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(true);
   const [fontSize, setFontSize] = useState("md");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [page, setPage] = useState("dashboard");
@@ -2969,61 +3012,45 @@ function App() {
       button { font-family: inherit; }
       ::-webkit-scrollbar { width: 5px; height: 5px; }
       ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 99px; }
+      ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.4); border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.7); }
+      input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     `}</style>
-    <div data-fs={fontSize} style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: "'Poppins', 'Inter', 'Segoe UI', sans-serif", color: C.text }}>
-      {/* Sidebar */}
-      <aside style={{
-        width: sidebarOpen ? 248 : 64, background: C.sidebarBg,
-        borderRight: `1px solid ${C.sidebarBorder}`,
-        flexShrink: 0, display: "flex", flexDirection: "column", transition: "width 0.22s ease",
-        overflow: "hidden"
+    <div style={{ display: "flex", height: "100vh", background: C.bg, fontFamily: "'Inter', system-ui, sans-serif", color: C.text, overflow: "hidden" }} data-fs={fontSize}>
+
+      {/* ── Sidebar ── */}
+      <div style={{
+        width: sidebarOpen ? 220 : 56, minWidth: sidebarOpen ? 220 : 56,
+        background: C.sidebarBg, borderRight: `1px solid ${C.cardBorder}`,
+        display: "flex", flexDirection: "column", transition: "width 0.2s ease",
+        overflow: "hidden", flexShrink: 0
       }}>
         {/* Logo */}
-        <div style={{ padding: sidebarOpen ? "22px 18px 20px" : "20px 12px", display: "flex", alignItems: "center", gap: 10, minHeight: 80 }}>
-          <img
-            src="/Finance-tool/assets/fca-logo-white.png"
-            alt="FCA"
-            style={{ height: 36, width: "auto", flexShrink: 0, display: "block" }}
-            onError={e => { e.target.style.display='none'; }}
-          />
-          {sidebarOpen && (
-            <div style={{ minWidth: 0 }}>
-              <div style={{ color: "#FFFFFF", fontWeight: 700, fontSize: 13, letterSpacing: 0.2, lineHeight: 1.2 }}>Field Control</div>
-              <div style={{ color: C.sidebarFg, fontSize: 10, fontWeight: 500, letterSpacing: "0.07em", textTransform: "uppercase", marginTop: 2 }}>Financial Planning &amp; Analysis</div>
-            </div>
-          )}
-          <button onClick={() => setSidebarOpen(o => !o)}
-            style={{ marginLeft: "auto", background: "none", border: "none", color: C.sidebarFg, cursor: "pointer", padding: 4, flexShrink: 0, display: "flex", alignItems: "center" }}>
-            {sidebarOpen ? <ChevronDown size={15} style={{ transform: "rotate(90deg)" }} /> : <ChevronRight size={15} />}
-          </button>
+        <div style={{ padding: "14px 12px", borderBottom: `1px solid ${C.cardBorder}`, display: "flex", alignItems: "center", gap: 10, minHeight: 56 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ color: "#fff", fontWeight: 800, fontSize: 14 }}>F</span>
+          </div>
+          {sidebarOpen && <span style={{ color: C.actual, fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden" }}>FCA FP&amp;A</span>}
         </div>
 
-        {/* Nav */}
-        <nav style={{ flex: 1, padding: "4px 10px", overflowY: "auto", overflowX: "hidden" }}>
+        {/* Nav items */}
+        <nav style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
           {navItems.map(({ id, label, icon: Icon, sub }) => {
-            const active = page === id;
+            const isActive = page === id;
             return (
-              <button key={id} onClick={() => handleNav(id)}
-                style={{
-                  width: "100%", display: "flex", alignItems: "center", gap: 10,
-                  padding: sidebarOpen ? "9px 12px" : "10px 0",
-                  justifyContent: sidebarOpen ? "flex-start" : "center",
-                  borderRadius: 8,
-                  background: active ? C.sidebarActiveBg : "transparent",
-                  border: "none",
-                  color: active ? C.sidebarActiveFg : C.sidebarFg,
-                  cursor: "pointer", marginBottom: 2, textAlign: "left",
-                  transition: "background 0.15s, color 0.15s",
-                }}
-                onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.sidebarHover; }}
-                onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
-              >
-                <Icon size={18} style={{ flexShrink: 0, color: active ? "#FFFFFF" : C.sidebarFg }} />
+              <button key={id} onClick={() => handleNav(id)} style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 10,
+                padding: sidebarOpen ? "9px 16px" : "9px 16px",
+                background: isActive ? C.sidebarActiveBg : "transparent",
+                color: isActive ? C.sidebarActiveFg : C.textDim,
+                border: "none", borderLeft: isActive ? `3px solid ${C.accent}` : "3px solid transparent",
+                cursor: "pointer", textAlign: "left", transition: "all 0.15s"
+              }}>
+                <Icon size={17} style={{ flexShrink: 0 }} />
                 {sidebarOpen && (
-                  <div style={{ overflow: "hidden", minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: active ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
-                    {sub && <div style={{ fontSize: 10, color: C.sidebarFg, marginTop: 1 }}>{sub}</div>}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: isActive ? 600 : 400, whiteSpace: "nowrap" }}>{label}</div>
+                    {sub && <div style={{ fontSize: 10, opacity: 0.65, marginTop: 1 }}>{sub}</div>}
                   </div>
                 )}
               </button>
@@ -3031,61 +3058,73 @@ function App() {
           })}
         </nav>
 
-        {/* Bottom */}
-        <div style={{ padding: "12px 10px", borderTop: `1px solid ${C.sidebarBorder}` }}>
+        {/* Bottom controls */}
+        <div style={{ borderTop: `1px solid ${C.cardBorder}` }}>
+          {/* Font size */}
           {sidebarOpen && (
-            <div style={{ display: "flex", gap: 4, justifyContent: "center", marginBottom: 8 }}>
+            <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ color: C.textDim, fontSize: 10, fontWeight: 600, marginRight: 2 }}>SIZE</span>
               {["sm","md","lg"].map(s => (
-                <button key={s} onClick={() => setFontSize(s)}
-                  style={{ padding: "3px 9px", borderRadius: 6,
-                    border: `1px solid ${fontSize===s ? C.accentLight : "rgba(255,255,255,0.18)"}`,
-                    background: fontSize===s ? C.accentLight : "transparent",
-                    color: fontSize===s ? "#fff" : C.sidebarFg,
-                    cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
-                  {s.toUpperCase()}
-                </button>
+                <button key={s} onClick={() => setFontSize(s)} style={{
+                  padding: "2px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                  border: `1px solid ${fontSize === s ? C.accent : C.cardBorder}`,
+                  background: fontSize === s ? C.accentSoft : "transparent",
+                  color: fontSize === s ? C.accentLight : C.textDim
+                }}>{s.toUpperCase()}</button>
               ))}
             </div>
           )}
-          <button onClick={() => setDarkMode(d => !d)}
-            style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: sidebarOpen ? "flex-start" : "center",
-              gap: 8, padding: "8px 10px", borderRadius: 8,
-              border: "none", background: "rgba(255,255,255,0.06)",
-              color: C.sidebarFg, cursor: "pointer" }}>
-            {darkMode ? <Sun size={15} /> : <Moon size={15} />}
-            {sidebarOpen && <span style={{ fontSize: 12 }}>{darkMode ? "Light Mode" : "Dark Mode"}</span>}
+          {/* Dark/light mode */}
+          <button onClick={() => setDarkMode(d => !d)} style={{
+            width: "100%", display: "flex", alignItems: "center", gap: 10,
+            padding: sidebarOpen ? "9px 16px" : "9px 16px",
+            background: "transparent", border: "none", color: C.textDim, cursor: "pointer"
+          }}>
+            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+            {sidebarOpen && <span style={{ fontSize: 11 }}>{darkMode ? "Light Mode" : "Dark Mode"}</span>}
           </button>
-          {/* User avatar */}
-          {sidebarOpen && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 10px 2px", marginTop: 6, borderTop: `1px solid ${C.sidebarBorder}` }}>
-              <div style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(27,150,255,0.25)", color: "#fff",
-                display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>EM</div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ color: "#FFFFFF", fontSize: 13, fontWeight: 600, lineHeight: 1.2 }}>Eddie Martin</div>
-                <div style={{ color: C.sidebarFg, fontSize: 11, marginTop: 1 }}>Finance · Admin</div>
-              </div>
+          {/* User profile */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: sidebarOpen ? "10px 14px" : "10px 12px" }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <span style={{ color: "#FFFFFF", fontSize: 11, fontWeight: 700 }}>EC</span>
             </div>
-          )}
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <main style={{ flex: 1, padding: "24px 32px 36px", overflowY: "auto", minWidth: 0, background: C.bg }}>
-        {/* Top bar */}
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 24, gap: 16, paddingBottom: 20, borderBottom: `1px solid ${C.cardBorder}` }}>
-          <div style={{ flex: 1 }}>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: C.actual, letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-              {navItems.find(n => n.id === page)?.label || ""}
-              {navItems.find(n => n.id === page)?.sub ? ` — ${navItems.find(n => n.id === page).sub}` : ""}
-            </h1>
-            <div style={{ color: C.textDim, fontSize: 12, marginTop: 3 }}>Field Control Analytics · FY 2026–2028</div>
+            {sidebarOpen && (
+              <div>
+                <div style={{ color: C.actual, fontSize: 13, fontWeight: 600, lineHeight: 1.2 }}>Eddie Chang</div>
+                <div style={{ color: C.textDim, fontSize: 10 }}>FCA Accounting</div>
+              </div>
+            )}
           </div>
-          {/* Year tabs */}
-          <div style={{ display: "flex", background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 999, padding: 3, gap: 0 }}>
-            {YEARS.map(yr => (
-              <button key={yr} style={{
-                padding: "6px 16px", borderRadius: 999, border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 600,
-                background: yr === 2026 ? C.accent : "transparent",
+          {/* Collapse */}
+          <button onClick={() => setSidebarOpen(o => !o)} style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: sidebarOpen ? "flex-end" : "center",
+            padding: "8px 12px", background: "transparent", border: "none", color: C.textDim, cursor: "pointer"
+          }}>
+            <ChevronRight size={15} style={{ transform: sidebarOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Main content ── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column" }}>
+        {page === "dashboard"    && <Dashboard onNav={handleNav} projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "rev-vs-plan"  && <RevVsPlan projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "avb-summary"  && <AvBSummary projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "avb-detail"   && <AvBDetail projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "fullpl"       && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} rolledItems={rolledItems} />}
+        {page === "projections"  && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "scenarios"    && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} rolledItems={rolledItems} setRolledItems={setRolledItems} />}
+        {page === "adj-ebitda"   && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} rolledItems={rolledItems} />}
+        {page === "transactions" && <Transactions />}
+      </div>
+    </div>
+    <AIChat />
+  </>
+  </ThemeCtx.Provider>
+  );
+}
+export default App;
+nt : "transparent",
                 color: yr === 2026 ? "#fff" : C.textDim,
                 transition: "all 0.15s"
               }}>{`FY ${yr}`}</button>
