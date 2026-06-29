@@ -2970,6 +2970,67 @@ function Transactions() {
   );
 }
 
+function AIChat() {
+  const C = useC();
+  const [open, setOpen] = useState(false);
+  const [msgs, setMsgs] = useState([{ role: "assistant", text: "Hi! Ask me anything about the FP&A data." }]);
+  const [input, setInput] = useState("");
+  const endRef = React.useRef(null);
+  React.useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, open]);
+
+  const send = () => {
+    if (!input.trim()) return;
+    setMsgs(m => [...m, { role: "user", text: input }, { role: "assistant", text: "I'm a static assistant — connect an AI backend to enable live answers." }]);
+    setInput("");
+  };
+
+  return (
+    <div style={{ position: "fixed", bottom: 20, right: 20, zIndex: 1000, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+      {open && (
+        <div style={{ width: 320, height: 400, background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", background: C.sidebarBg, borderBottom: `1px solid ${C.cardBorder}`,
+            display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ color: C.actual, fontWeight: 600, fontSize: 13 }}>FP&A Assistant</span>
+            <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer", padding: 2 }}>
+              <X size={15} />
+            </button>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            {msgs.map((m, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                <div style={{ maxWidth: "80%", padding: "7px 11px", borderRadius: 10, fontSize: 12, lineHeight: 1.45,
+                  background: m.role === "user" ? C.accent : C.projBg,
+                  color: m.role === "user" ? "#fff" : C.actual }}>
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            <div ref={endRef} />
+          </div>
+          <div style={{ padding: 10, borderTop: `1px solid ${C.cardBorder}`, display: "flex", gap: 6 }}>
+            <input value={input} onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && send()}
+              placeholder="Ask a question…"
+              style={{ flex: 1, padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.cardBorder}`,
+                background: C.inputBg || C.projBg, color: C.actual, fontSize: 12, outline: "none" }} />
+            <button onClick={send} style={{ padding: "6px 10px", borderRadius: 8, background: C.accent,
+              border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center" }}>
+              <Send size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: 44, height: 44, borderRadius: "50%", background: C.accent,
+        border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
+        {open ? <X size={18} /> : <MessageCircle size={18} />}
+      </button>
+    </div>
+  );
+}
+
 function App() {
   const [darkMode, setDarkMode] = useState(true);
   const [fontSize, setFontSize] = useState("md");
@@ -3077,7 +3138,7 @@ function App() {
           {/* Dark/light mode */}
           <button onClick={() => setDarkMode(d => !d)} style={{
             width: "100%", display: "flex", alignItems: "center", gap: 10,
-            padding: sidebarOpen ? "9px 16px" : "9px 16px",
+            padding: "9px 16px",
             background: "transparent", border: "none", color: C.textDim, cursor: "pointer"
           }}>
             {darkMode ? <Sun size={16} /> : <Moon size={16} />}
@@ -3105,7 +3166,7 @@ function App() {
         </div>
       </div>
 
-      {/* ── Main content ── */}
+      {/* Main content */}
       <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column" }}>
         {page === "dashboard"    && <Dashboard onNav={handleNav} projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "rev-vs-plan"  && <RevVsPlan projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
@@ -3124,31 +3185,3 @@ function App() {
   );
 }
 export default App;
-nt : "transparent",
-                color: yr === 2026 ? "#fff" : C.textDim,
-                transition: "all 0.15s"
-              }}>{`FY ${yr}`}</button>
-            ))}
-          </div>
-          {/* Bell */}
-          <button style={{ width: 38, height: 38, borderRadius: "50%", border: `1px solid ${C.cardBorder}`, background: C.card, color: C.textDim, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-            <Bell size={17} />
-          </button>
-        </div>
-
-        {/* Page content */}
-        {page === "dashboard" && <Dashboard onNav={handleNav} projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
-        {page === "rev-vs-plan" && <RevVsPlan projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
-        {page === "fullpl" && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} rolledItems={rolledItems} />}
-        {page === "projections" && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
-        {page === "avb-summary" && <AvBSummary projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
-        {page === "transactions" && <Transactions />}
-        {page === "avb-detail" && <AvBDetail projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
-        {page === "scenarios" && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} rolledItems={rolledItems} setRolledItems={setRolledItems} />}
-        {page === "adj-ebitda" && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} rolledItems={rolledItems} />}
-      </main>
-    </div>
-    </>
-    </ThemeCtx.Provider>
-  );
-}
