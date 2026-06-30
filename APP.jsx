@@ -44,7 +44,7 @@ const fmt = (n) => {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 };
 const pct = (n) => n == null ? "—" : `${(n * 100).toFixed(1)}%`;
-const varColor = (v) => v > 0 ? "#22c55e" : v < 0 ? "#ef4444" : "#94a3b8";
+const varColor = (v) => v > 0 ? C.positive : v < 0 ? C.negative : C.textDim;
 const sum = (arr) => arr ? arr.reduce((a, b) => a + (b || 0), 0) : 0;
 const isActualMonth = (yr, mi) => yr === 2026 && mi <= ACTUALS_THRU;
 const getRowData = (row, year) => year === 2026 ? row.v26 : year === 2027 ? row.v27 : row.v28;
@@ -165,24 +165,34 @@ const getMonthlyChart = (year) => {
 
 // ─── Color themes ────────────────────────────────────────────────────────────
 const DARK_THEME = {
-  bg: "#0f1e2e", card: "#162033", cardBorder: "#1e3a62",
-  accent: "#1B96FF", accentLight: "#60a5fa", accentSoft: "rgba(27,150,255,0.15)",
-  actual: "#e2e8f0", projection: "#93c5fd",
-  projBg: "rgba(27,150,255,0.10)",
-  totalBg: "rgba(42,82,152,0.45)", headerBg: "rgba(42,82,152,0.25)",
-  positive: "#22c55e", positiveSoft: "rgba(34,197,94,0.15)",
-  negative: "#ef4444", negativeSoft: "rgba(239,68,68,0.15)",
-  muted: "#64748b", text: "#e2e8f0", textDim: "#94a3b8",
-  shadow: "0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.25)",
-  sidebarBg: "#0a1628",
-  sidebarFg: "rgba(255,255,255,0.60)",
-  sidebarActiveBg: "rgba(27,150,255,0.20)",
+  bg: "#F3F6FB",
+  card: "#FFFFFF",
+  cardBorder: "#E3EAF3",
+  accent: "#1B96FF",
+  accentLight: "#1B96FF",
+  accentSoft: "#EAF3FD",
+  actual: "#16325C",
+  projection: "#0B5CAB",
+  projBg: "rgba(11,92,171,0.07)",
+  totalBg: "#EAF3FD",
+  headerBg: "rgba(11,92,171,0.04)",
+  positive: "#2E844A",
+  positiveSoft: "#E3F1E8",
+  negative: "#BA0517",
+  negativeSoft: "#FBEAE9",
+  muted: "#5E6C84",
+  text: "#16325C",
+  textDim: "#5E6C84",
+  shadow: "0 1px 2px rgba(3,45,96,0.06), 0 6px 18px rgba(3,45,96,0.07)",
+  sidebarBg: "#032D60",
+  sidebarFg: "rgba(255,255,255,0.70)",
+  sidebarActiveBg: "rgba(27,150,255,0.18)",
   sidebarActiveFg: "#FFFFFF",
-  sidebarHover: "rgba(255,255,255,0.06)",
+  sidebarHover: "rgba(255,255,255,0.08)",
   sidebarBorder: "rgba(255,255,255,0.08)",
-  chartActual: "#1B96FF",
-  chartProj: "#7FB8E8",
-  inputBg: "rgba(27,150,255,0.08)",
+  chartActual: "#0B5CAB",
+  chartProj: "#9DC7EE",
+  inputBg: "#EAF3FD",
 };
 
 // ─── Shared UI Components ─────────────────────────────────────────────────────
@@ -2067,7 +2077,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
     "Product": "#a78bfa",
     "Retention": "#f59e0b",
     "Security": "#f87171",
-    "Operations": "#94a3b8",
+    "Operations": C.textDim,
     "Leadership": "#e879f9",
     "Innovation": "#34d399",
   };
@@ -2275,9 +2285,9 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                       {(() => {
                         const badges = {
                           plan:     { bg: "rgba(249,115,22,0.2)",  color: "#f97316", label: "In Projections" },
-                          approved: { bg: "rgba(34,197,94,0.15)",  color: "#22c55e", label: "Approved" },
-                          rejected: { bg: "rgba(239,68,68,0.15)",  color: "#f87171", label: "Rejected" },
-                          pending:  { bg: "rgba(148,163,184,0.15)", color: "#94a3b8", label: "Pending" },
+                          approved: { bg: C.positiveSoft,  color: C.positive, label: "Approved" },
+                          rejected: { bg: C.negativeSoft,  color: "#f87171", label: "Rejected" },
+                          pending:  { bg: "rgba(148,163,184,0.15)", color: C.textDim, label: "Pending" },
                         };
                         const b = badges[item.status] || badges.pending;
                         return (
@@ -2313,7 +2323,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                         <button
                           onClick={() => setWishList && setWishList(prev => prev.filter(w => w.id !== item.id))}
                           style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, cursor: "pointer",
-                            border: "none", background: "rgba(239,68,68,0.15)", color: "#f87171" }}>
+                            border: "none", background: C.negativeSoft, color: "#f87171" }}>
                           ✕
                         </button>
                         {approvedIds?.has(item.id) && item.glCode && (
@@ -2695,7 +2705,7 @@ function YoY({ projOverrides, approvedItems, rolledItems }) {
             <tbody>
               <tr style={{borderBottom:`1px solid ${C.cardBorder}`}}>
                 <td style={{padding:"10px 16px",color:C.actual,fontWeight:600}}>
-                  <span style={{background:"rgba(148,163,184,0.15)",color:"#94a3b8",borderRadius:4,padding:"2px 8px",fontSize:11,fontWeight:600}}>2025</span>
+                  <span style={{background:"rgba(148,163,184,0.15)",color:C.textDim,borderRadius:4,padding:"2px 8px",fontSize:11,fontWeight:600}}>2025</span>
                 </td>
                 {rev2025.map((v,i) => (
                   <td key={i} style={{padding:"10px 8px",textAlign:"right",color:C.actual}}>{fmtK(v)}</td>
@@ -2923,7 +2933,7 @@ function App() {
     <>
     <style>{`
       * { box-sizing: border-box; }
-      body { margin: 0; }
+      body { margin: 0; background: #eef1f6; }
       [data-fs="lg"] * { font-size: 16px !important; }
       [data-fs="lg"] h1, [data-fs="lg"] h2, [data-fs="lg"] h3 { font-size: 21px !important; }
       button { font-family: inherit; }
