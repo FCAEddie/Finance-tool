@@ -4,16 +4,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useState, useMemo, useCallback, useRef } from "react";
 import {
-  LineChart, Line, BarChart, Bar, ComposedChart, Area,
+  Line, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import { QB_TRANSACTIONS, QB_LAST_SYNC, QB_SUMMARY } from "./transactions-data.js";
 import {
   LayoutDashboard, TableProperties, TrendingUp, BarChart2,
-  ChevronDown, ChevronRight, Upload, Plus, Pencil, Trash2,
-  X, CheckCircle, AlertCircle, Info, ArrowUpRight, ArrowDownRight,
-  FileText, Settings, Download, Sliders, Receipt, MessageCircle, Send,
-  Sun, Moon, Bell
+  ChevronDown, ChevronRight, Plus, Pencil,
+  X, CheckCircle, Info, ArrowUpRight, ArrowDownRight,
+  Download, Sliders, Receipt, MessageCircle, Send
 } from "lucide-react";
 
 const ThemeCtx = React.createContext(null);
@@ -183,35 +182,7 @@ const DARK_THEME = {
   sidebarBorder: "rgba(255,255,255,0.08)",
   chartActual: "#1B96FF",
   chartProj: "#7FB8E8",
-};
-const LIGHT_THEME = {
-  bg: "#F3F6FB",
-  card: "#FFFFFF",
-  cardBorder: "#E3EAF3",
-  accent: "#0B5CAB",
-  accentLight: "#1B96FF",
-  accentSoft: "#EAF3FD",
-  actual: "#16325C",
-  projection: "#0B5CAB",
-  projBg: "rgba(11,92,171,0.07)",
-  totalBg: "#EAF3FD",
-  headerBg: "rgba(11,92,171,0.04)",
-  positive: "#2E844A",
-  positiveSoft: "#E3F1E8",
-  negative: "#BA0517",
-  negativeSoft: "#FBEAE9",
-  muted: "#5E6C84",
-  text: "#16325C",
-  textDim: "#5E6C84",
-  shadow: "0 1px 2px rgba(3,45,96,0.06), 0 6px 18px rgba(3,45,96,0.07)",
-  sidebarBg: "#032D60",
-  sidebarFg: "rgba(255,255,255,0.70)",
-  sidebarActiveBg: "rgba(27,150,255,0.18)",
-  sidebarActiveFg: "#FFFFFF",
-  sidebarHover: "rgba(255,255,255,0.08)",
-  sidebarBorder: "rgba(255,255,255,0.08)",
-  chartActual: "#0B5CAB",
-  chartProj: "#9DC7EE",
+  inputBg: "rgba(27,150,255,0.08)",
 };
 
 // ─── Shared UI Components ─────────────────────────────────────────────────────
@@ -1410,7 +1381,7 @@ function Projections({ projOverrides, setProjOverrides, approvedItems, rolledIte
       </div>
 
       {/* Data-driven note */}
-      <div style={{ background: "#1e293b", border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 16px",
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 16px",
         display: "flex", alignItems: "center", gap: 8 }}>
         <Info size={14} style={{ color: C.projection, flexShrink: 0 }} />
         <span style={{ color: C.textDim, fontSize: 12 }}>Projections based on 2026 Plan (Jun–Dec) and historical trend analysis. Data sourced from UNIFIED_PL plan arrays.</span>
@@ -1937,140 +1908,6 @@ function Transactions({ filterAccount, filterMonth }) {
     </div>
   );
 }
-
-
-// ─── FCA Data Assistant (Chat Widget) ────────────────────────────────────────
-function FCAAssistant() {
-  const C = useC();
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState([
-    { role: "bot", text: "Hi! I'm the FCA Data Assistant. Ask me about revenue, expenses, plan vs actuals, or net income." }
-  ]);
-  const [input, setInput] = useState("");
-  const messagesEndRef = useRef();
-
-  const getBotResponse = (q) => {
-    const lower = q.toLowerCase();
-    const k26 = KPIS_ALL["2026"];
-    if (!k26) return "Data not available.";
-
-    if (lower.includes("ytd revenue") || (lower.includes("ytd") && lower.includes("revenue"))) {
-      const ytd = sum(k26.rev.slice(0, 5));
-      return `YTD Revenue (Jan–May 2026): ${fmt(ytd)} — tracking across 5 actual months.`;
-    }
-    if (lower.includes("revenue")) {
-      const total = sum(k26.rev);
-      return `Full Year 2026 Revenue (plan): ${fmt(total)}. YTD (Jan–May actual): ${fmt(sum(k26.rev.slice(0, 5)), true)}.`;
-    }
-    if (lower.includes("vs plan") || lower.includes("plan")) {
-      const revRows = UNIFIED_PL.filter(r => r.type === "revenue");
-      const planYTD = PLAN_2026.rev.slice(0, 5).reduce((a, b) => a + b, 0);
-      const actYTD = sum(k26.rev.slice(0, 5));
-      const diff = actYTD - planYTD;
-      return `YTD Revenue vs Plan: Actual ${fmt(actYTD)} vs Plan ${fmt(planYTD)} — ${diff >= 0 ? "+" : ""}${fmt(diff)} (${((diff/planYTD)*100).toFixed(1)}%).`;
-    }
-    if (lower.includes("expense") || lower.includes("cost")) {
-      const totalExp = sum(k26.exp);
-      const ytdExp = sum(k26.exp.slice(0, 5));
-      const biggest = UNIFIED_PL.filter(r => r.type === "expense" && !isTotal(r.a) && !isHeader(r.a))
-        .map(r => ({ a: r.a, total: sum(r.v26) }))
-        .sort((a, b) => b.total - a.total)[0];
-      return `2026 YTD Expenses: ${fmt(ytdExp)}. Largest expense line: ${biggest?.a} (${fmt(biggest?.total)} annual).`;
-    }
-    if (lower.includes("net income") || lower.includes("profit") || lower.includes("bottom line")) {
-      const ytd = sum(k26.ni.slice(0, 5));
-      const full = sum(k26.ni);
-      return `YTD Net Income (Jan–May 2026): ${fmt(ytd)}. Full year plan: ${fmt(full)}.`;
-    }
-    if (lower.includes("ebitda")) {
-      const ytd = sum(k26.ebitda.slice(0, 5));
-      const full = sum(k26.ebitda);
-      return `YTD Adj. EBITDA (Jan–May 2026): ${fmt(ytd)}. Full year: ${fmt(full)}.`;
-    }
-    if (lower.includes("gross profit") || lower.includes("gross margin")) {
-      const ytd = sum(k26.gp.slice(0, 5));
-      const ytdRev = sum(k26.rev.slice(0, 5));
-      return `YTD Gross Profit: ${fmt(ytd)} (${((ytd/ytdRev)*100).toFixed(1)}% margin).`;
-    }
-    return "I can help with questions about FCA's revenue, expenses, plan vs actuals, and more. Try asking about YTD Revenue, vs Plan, Top Expenses, or Net Income.";
-  };
-
-  const send = () => {
-    if (!input.trim()) return;
-    const userMsg = { role: "user", text: input.trim() };
-    const botMsg = { role: "bot", text: getBotResponse(input.trim()) };
-    setMessages(prev => [...prev, userMsg, botMsg]);
-    setInput("");
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-  };
-
-  const chips = ["YTD Revenue", "vs Plan", "Top Expenses", "Net Income"];
-
-  return (
-    <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 1000, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-      {open && (
-        <div style={{ width: 320, height: 440, background: C.card, border: `1px solid ${C.accent}55`,
-          borderRadius: 16, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
-          {/* Header */}
-          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.cardBorder}`,
-            display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <MessageCircle size={16} style={{ color: C.accent }} />
-              <span style={{ color: C.actual, fontSize: 13, fontWeight: 700 }}>FCA Data Assistant</span>
-            </div>
-            <button onClick={() => setOpen(false)}
-              style={{ background: "none", border: "none", color: C.muted, cursor: "pointer" }}>
-              <X size={16} />
-            </button>
-          </div>
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-            {messages.map((m, i) => (
-              <div key={i} style={{
-                alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-                background: m.role === "user" ? C.accent : "#0f172a",
-                color: C.actual, borderRadius: 10, padding: "8px 12px", fontSize: 12,
-                maxWidth: "85%", lineHeight: 1.5 }}>
-                {m.text}
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-          {/* Suggested chips */}
-          <div style={{ padding: "8px 14px", display: "flex", gap: 6, flexWrap: "wrap", borderTop: `1px solid ${C.cardBorder}33` }}>
-            {chips.map(c => (
-              <button key={c} onClick={() => { setInput(c); }}
-                style={{ padding: "3px 10px", borderRadius: 12, border: `1px solid ${C.cardBorder}`,
-                  background: "transparent", color: C.textDim, cursor: "pointer", fontSize: 10 }}>
-                {c}
-              </button>
-            ))}
-          </div>
-          {/* Input */}
-          <div style={{ padding: "10px 14px", borderTop: `1px solid ${C.cardBorder}`, display: "flex", gap: 8 }}>
-            <input value={input} onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && send()}
-              placeholder="Ask about revenue, expenses..."
-              style={{ flex: 1, background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 8,
-                color: C.actual, padding: "6px 10px", fontSize: 12 }} />
-            <button onClick={send}
-              style={{ background: C.accent, border: "none", borderRadius: 8, color: "white",
-                padding: "6px 10px", cursor: "pointer", display: "flex", alignItems: "center" }}>
-              <Send size={13} />
-            </button>
-          </div>
-        </div>
-      )}
-      <button onClick={() => setOpen(o => !o)}
-        style={{ width: 48, height: 48, borderRadius: "50%", background: C.accent, border: "none",
-          color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: "0 4px 16px rgba(37,99,235,0.5)" }}>
-        <MessageCircle size={22} />
-      </button>
-    </div>
-  );
-}
-
 
 // ─── Page: Scenarios ─────────────────────────────────────────────────────────
 // ─── WishListForm Component ───────────────────────────────────────────────────
@@ -2770,6 +2607,230 @@ const WISH_LIST = [
   { id: 27, name: "Technical Operations Manager (US)", glCode: "601000 Salaries and Other Payroll Exp", requester: "Rizzo (SecOps)", priority: "Operations", annualCost: 150000, startMonth: "Apr", startYear: 2026, endMonth: "Dec", endYear: 2028, status: "pending", notes: "" },
   { id: 28, name: "ISO 270001", glCode: "605200 Outside Services", requester: "Rizzo", priority: "Security", annualCost: 0, startMonth: "Jan", startYear: 2027, endMonth: "Dec", endYear: 2028, status: "pending", notes: "Will plan for 2027, no plan for 2026 expense." },
 ];
+function YoY({ projOverrides, approvedItems, rolledItems }) {
+  const C = useC();
+  const [view, setView] = React.useState("monthly");
+  const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  // 2025 monthly revenue from QB transactions
+  const rev2025 = React.useMemo(() => {
+    const arr = Array(12).fill(0);
+    (QB_TRANSACTIONS || []).forEach(t => {
+      if (t.type === "invoice") {
+        const d = new Date(t.date);
+        if (d.getFullYear() === 2025) {
+          arr[d.getMonth()] += parseFloat(t.amount) || 0;
+        }
+      }
+    });
+    return arr;
+  }, []);
+
+  // 2026 monthly revenue from formula engine
+  const rev2026 = React.useMemo(() =>
+    Array.from({length:12}, (_,m) => computeEffective(LIVE_KPI_ROWS.rev, 2026, m, projOverrides, approvedItems, rolledItems)),
+    [projOverrides, approvedItems, rolledItems]
+  );
+
+  const fy2025  = rev2025.reduce((s,v)=>s+v,0);
+  const fy2026  = rev2026.reduce((s,v)=>s+v,0);
+
+  const fmtK = v => {
+    const abs = Math.abs(v);
+    const str = abs >= 1e6 ? "$" + (abs/1e6).toFixed(1) + "M" : abs >= 1000 ? "$" + (abs/1000).toFixed(0) + "K" : "$" + abs.toFixed(0);
+    return v < 0 ? "-" + str : str;
+  };
+  const fmtPct = v => (v >= 0 ? "+" : "") + (v*100).toFixed(1) + "%";
+
+  // Summary cards
+  const kpis = [
+    { label: "2025 FY Revenue", value: fmtK(fy2025), sub: "Full year actuals from QB" },
+    { label: "2026 FY Revenue", value: fmtK(fy2026), sub: "Jan–May actual, Jun–Dec proj" },
+    { label: "YoY Change $", value: fmtK(Math.abs(fy2026-fy2025)), positive: fy2026 >= fy2025, sub: fy2026 >= fy2025 ? "Ahead of prior year" : "Behind prior year", showColor: true },
+    { label: "YoY Change %", value: fmtPct(fy2025 ? (fy2026-fy2025)/fy2025 : 0), positive: fy2026 >= fy2025, sub: "Full year comparison", showColor: true },
+  ];
+
+  return (
+    <div>
+      <div style={{marginBottom:24}}>
+        <h1 style={{margin:0,fontSize:24,fontWeight:700,color:C.actual}}>Year Over Year</h1>
+        <p style={{margin:"4px 0 0",color:C.textDim,fontSize:13}}>Revenue comparison — 2025 actual vs 2026 actual/projected</p>
+      </div>
+
+      {/* KPI cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:24}}>
+        {kpis.map((k,i) => (
+          <div key={i} style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:12,padding:"16px 20px"}}>
+            <div style={{fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",color:C.textDim,marginBottom:8}}>{k.label}</div>
+            <div style={{fontSize:26,fontWeight:700,color: k.showColor ? (k.positive ? C.positive : C.negative) : C.actual,marginBottom:4}}>{k.value}</div>
+            <div style={{fontSize:11,color:C.textDim}}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* View toggle */}
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        {["monthly","ytd","annual"].map(v => (
+          <button key={v} onClick={()=>setView(v)} style={{
+            padding:"6px 16px",borderRadius:8,border:`1px solid ${view===v?C.accent:C.cardBorder}`,
+            background:view===v?C.accent:"transparent",color:view===v?"#fff":C.actual,
+            cursor:"pointer",fontSize:13,fontWeight:view===v?600:400,textTransform:"capitalize"
+          }}>{v === "ytd" ? "YTD" : v.charAt(0).toUpperCase()+v.slice(1)}</button>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:12,overflow:"hidden"}}>
+        {view === "monthly" && (
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{background:C.totalBg}}>
+                <th style={{padding:"10px 16px",textAlign:"left",color:C.textDim,fontWeight:600,fontSize:11}}>Year</th>
+                {MONTHS_SHORT.map(m => (
+                  <th key={m} style={{padding:"10px 8px",textAlign:"right",color:C.textDim,fontWeight:600,fontSize:11}}>{m}</th>
+                ))}
+                <th style={{padding:"10px 12px",textAlign:"right",color:C.textDim,fontWeight:600,fontSize:11}}>FY Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style={{borderBottom:`1px solid ${C.cardBorder}`}}>
+                <td style={{padding:"10px 16px",color:C.actual,fontWeight:600}}>
+                  <span style={{background:"rgba(148,163,184,0.15)",color:"#94a3b8",borderRadius:4,padding:"2px 8px",fontSize:11,fontWeight:600}}>2025</span>
+                </td>
+                {rev2025.map((v,i) => (
+                  <td key={i} style={{padding:"10px 8px",textAlign:"right",color:C.actual}}>{fmtK(v)}</td>
+                ))}
+                <td style={{padding:"10px 12px",textAlign:"right",color:C.actual,fontWeight:700}}>{fmtK(fy2025)}</td>
+              </tr>
+              <tr style={{borderBottom:`1px solid ${C.cardBorder}`}}>
+                <td style={{padding:"10px 16px",color:C.actual,fontWeight:600}}>
+                  <span style={{background:`${C.accent}22`,color:C.accent,borderRadius:4,padding:"2px 8px",fontSize:11,fontWeight:600}}>2026</span>
+                </td>
+                {rev2026.map((v,i) => (
+                  <td key={i} style={{padding:"10px 8px",textAlign:"right",
+                    color: i <= ACTUALS_THRU ? C.actual : C.projection,
+                    opacity: i <= ACTUALS_THRU ? 1 : 0.8
+                  }}>{fmtK(v)}</td>
+                ))}
+                <td style={{padding:"10px 12px",textAlign:"right",color:C.actual,fontWeight:700}}>{fmtK(fy2026)}</td>
+              </tr>
+              <tr style={{borderBottom:`1px solid ${C.cardBorder}`,background:C.headerBg}}>
+                <td style={{padding:"10px 16px",color:C.textDim,fontSize:12}}>&#916; $</td>
+                {MONTHS_SHORT.map((_,i) => {
+                  const delta = rev2026[i] - rev2025[i];
+                  return <td key={i} style={{padding:"10px 8px",textAlign:"right",fontSize:12,color:delta>=0?C.positive:C.negative,fontWeight:600}}>{delta>=0?"+":""}{fmtK(delta)}</td>;
+                })}
+                <td style={{padding:"10px 12px",textAlign:"right",fontSize:12,fontWeight:700,color:(fy2026-fy2025)>=0?C.positive:C.negative}}>
+                  {(fy2026-fy2025)>=0?"+":""}{fmtK(fy2026-fy2025)}
+                </td>
+              </tr>
+              <tr>
+                <td style={{padding:"10px 16px",color:C.textDim,fontSize:12}}>&#916; %</td>
+                {MONTHS_SHORT.map((_,i) => {
+                  const pct = rev2025[i] ? (rev2026[i]-rev2025[i])/rev2025[i] : 0;
+                  return <td key={i} style={{padding:"10px 8px",textAlign:"right",fontSize:12,color:pct>=0?C.positive:C.negative}}>{fmtPct(pct)}</td>;
+                })}
+                <td style={{padding:"10px 12px",textAlign:"right",fontSize:12,fontWeight:700,color:(fy2026-fy2025)>=0?C.positive:C.negative}}>
+                  {fmtPct(fy2025?(fy2026-fy2025)/fy2025:0)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+
+        {view === "ytd" && (() => {
+          const ytdMonths = Array.from({length: ACTUALS_THRU+1}, (_,i) => i);
+          const ytdRev25 = ytdMonths.map(i => rev2025[i]);
+          const ytdRev26 = ytdMonths.map(i => rev2026[i]);
+          return (
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead>
+                <tr style={{background:C.totalBg}}>
+                  <th style={{padding:"10px 16px",textAlign:"left",color:C.textDim,fontWeight:600,fontSize:11}}>Metric</th>
+                  {ytdMonths.map(i => (
+                    <th key={i} style={{padding:"10px 10px",textAlign:"right",color:C.textDim,fontWeight:600,fontSize:11}}>
+                      Jan&#8211;{MONTHS_SHORT[i]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{borderBottom:`1px solid ${C.cardBorder}`}}>
+                  <td style={{padding:"10px 16px",color:C.actual,fontWeight:600}}>2025 Revenue</td>
+                  {ytdMonths.map(i => {
+                    const cum = ytdRev25.slice(0,i+1).reduce((s,v)=>s+v,0);
+                    return <td key={i} style={{padding:"10px 10px",textAlign:"right",color:C.actual}}>{fmtK(cum)}</td>;
+                  })}
+                </tr>
+                <tr style={{borderBottom:`1px solid ${C.cardBorder}`}}>
+                  <td style={{padding:"10px 16px",color:C.actual,fontWeight:600}}>2026 Revenue</td>
+                  {ytdMonths.map(i => {
+                    const cum = ytdRev26.slice(0,i+1).reduce((s,v)=>s+v,0);
+                    return <td key={i} style={{padding:"10px 10px",textAlign:"right",color:C.actual}}>{fmtK(cum)}</td>;
+                  })}
+                </tr>
+                <tr style={{borderBottom:`1px solid ${C.cardBorder}`,background:C.headerBg}}>
+                  <td style={{padding:"10px 16px",color:C.textDim,fontSize:12}}>YoY &#916; $</td>
+                  {ytdMonths.map(i => {
+                    const d25 = ytdRev25.slice(0,i+1).reduce((s,v)=>s+v,0);
+                    const d26 = ytdRev26.slice(0,i+1).reduce((s,v)=>s+v,0);
+                    const delta = d26-d25;
+                    return <td key={i} style={{padding:"10px 10px",textAlign:"right",fontSize:12,color:delta>=0?C.positive:C.negative,fontWeight:600}}>{delta>=0?"+":""}{fmtK(delta)}</td>;
+                  })}
+                </tr>
+                <tr>
+                  <td style={{padding:"10px 16px",color:C.textDim,fontSize:12}}>YoY &#916; %</td>
+                  {ytdMonths.map(i => {
+                    const d25 = ytdRev25.slice(0,i+1).reduce((s,v)=>s+v,0);
+                    const d26 = ytdRev26.slice(0,i+1).reduce((s,v)=>s+v,0);
+                    const pct = d25 ? (d26-d25)/d25 : 0;
+                    return <td key={i} style={{padding:"10px 10px",textAlign:"right",fontSize:12,color:pct>=0?C.positive:C.negative}}>{fmtPct(pct)}</td>;
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          );
+        })()}
+
+        {view === "annual" && (
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{background:C.totalBg}}>
+                {["Metric","2025 Actual","2026 Proj","Change $","Change %"].map(h => (
+                  <th key={h} style={{padding:"12px 16px",textAlign:h==="Metric"?"left":"right",color:C.textDim,fontWeight:600,fontSize:11}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { label:"Revenue", v25: fy2025, v26: fy2026 },
+              ].map((row,i) => {
+                const delta = row.v26 - row.v25;
+                const pct = row.v25 ? delta/row.v25 : 0;
+                return (
+                  <tr key={i} style={{borderBottom:`1px solid ${C.cardBorder}`}}>
+                    <td style={{padding:"12px 16px",color:C.actual,fontWeight:600}}>{row.label}</td>
+                    <td style={{padding:"12px 16px",textAlign:"right",color:C.actual}}>{fmtK(row.v25)}</td>
+                    <td style={{padding:"12px 16px",textAlign:"right",color:C.actual}}>{fmtK(row.v26)}</td>
+                    <td style={{padding:"12px 16px",textAlign:"right",color:delta>=0?C.positive:C.negative,fontWeight:600}}>{delta>=0?"+":""}{fmtK(delta)}</td>
+                    <td style={{padding:"12px 16px",textAlign:"right",color:delta>=0?C.positive:C.negative,fontWeight:600}}>{fmtPct(pct)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <p style={{marginTop:12,fontSize:11,color:C.textDim}}>
+        2025 revenue computed from {(QB_TRANSACTIONS||[]).filter(t=>t.type==="invoice"&&new Date(t.date).getFullYear()===2025).length.toLocaleString()} QB invoices (Legacy + Freedom).
+        {" "}2026 Jan&#8211;{["Jan","Feb","Mar","Apr","May"][ACTUALS_THRU]} are locked actuals; remaining months are formula-projected.
+      </p>
+    </div>
+  );
+}
+
+
 function AIChat() {
   const C = useC();
   const [open, setOpen] = useState(false);
@@ -2832,8 +2893,6 @@ function AIChat() {
 }
 
 function App() {
-  const [darkMode, setDarkMode] = useState(true);
-  const [fontSize, setFontSize] = useState("md");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [page, setPage] = useState("dashboard");
   const [projOverrides, setProjOverrides] = useState({});
@@ -2842,7 +2901,7 @@ function App() {
   const [approvedItemIds, setApprovedItemIds] = useState(new Set(WISH_LIST.filter(w => w.status === "plan").map(w => w.id)));
   const [rolledItems, setRolledItems] = useState([]);
 
-  const C = darkMode ? DARK_THEME : LIGHT_THEME;
+  const C = DARK_THEME;
   const approvedItems = wishListItems.filter(w => approvedItemIds.has(w.id));
   const handleNav = (id) => setPage(id);
 
@@ -2856,6 +2915,7 @@ function App() {
     { id: "scenarios",   label: "Scenarios",           icon: Sliders },
     { id: "adj-ebitda",    label: "Adj. EBITDA",         icon: TrendingUp },
   { id: "transactions",  label: "Transactions",         icon: Receipt },
+  { id: "yoy",           label: "Year Over Year",       icon: TrendingUp },
   ];
 
   return (
@@ -2864,11 +2924,7 @@ function App() {
     <style>{`
       * { box-sizing: border-box; }
       body { margin: 0; }
-      [data-fs="sm"] * { font-size: 13px !important; }
-      [data-fs="md"] * { font-size: 14px !important; }
       [data-fs="lg"] * { font-size: 16px !important; }
-      [data-fs="sm"] h1, [data-fs="sm"] h2, [data-fs="sm"] h3 { font-size: 15px !important; }
-      [data-fs="md"] h1, [data-fs="md"] h2, [data-fs="md"] h3 { font-size: 18px !important; }
       [data-fs="lg"] h1, [data-fs="lg"] h2, [data-fs="lg"] h3 { font-size: 21px !important; }
       button { font-family: inherit; }
       ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -2877,7 +2933,7 @@ function App() {
       ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.7); }
       input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     `}</style>
-    <div style={{ display: "flex", height: "100vh", background: C.bg, fontFamily: "'Inter', system-ui, sans-serif", color: C.text, overflow: "hidden" }} data-fs={fontSize}>
+    <div style={{ display: "flex", height: "100vh", background: C.bg, fontFamily: "'Inter', system-ui, sans-serif", color: C.text, overflow: "hidden" }} data-fs="lg">
 
       {/* ── Sidebar ── */}
       <div style={{
@@ -2921,29 +2977,7 @@ function App() {
 
         {/* Bottom controls */}
         <div style={{ borderTop: `1px solid ${C.cardBorder}` }}>
-          {/* Font size */}
-          {sidebarOpen && (
-            <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ color: C.textDim, fontSize: 10, fontWeight: 600, marginRight: 2 }}>SIZE</span>
-              {["sm","md","lg"].map(s => (
-                <button key={s} onClick={() => setFontSize(s)} style={{
-                  padding: "2px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer",
-                  border: `1px solid ${fontSize === s ? C.accent : C.cardBorder}`,
-                  background: fontSize === s ? C.accentSoft : "transparent",
-                  color: fontSize === s ? C.accentLight : C.textDim
-                }}>{s.toUpperCase()}</button>
-              ))}
-            </div>
-          )}
-          {/* Dark/light mode */}
-          <button onClick={() => setDarkMode(d => !d)} style={{
-            width: "100%", display: "flex", alignItems: "center", gap: 10,
-            padding: "9px 16px",
-            background: "transparent", border: "none", color: C.textDim, cursor: "pointer"
-          }}>
-            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-            {sidebarOpen && <span style={{ fontSize: 11 }}>{darkMode ? "Light Mode" : "Dark Mode"}</span>}
-          </button>
+
           {/* User profile */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: sidebarOpen ? "10px 14px" : "10px 12px" }}>
             <div style={{ width: 28, height: 28, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -2977,6 +3011,7 @@ function App() {
         {page === "scenarios"    && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} rolledItems={rolledItems} setRolledItems={setRolledItems} />}
         {page === "adj-ebitda"   && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} rolledItems={rolledItems} />}
         {page === "transactions" && <Transactions />}
+        {page === "yoy" && <YoY projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
       </div>
     </div>
     <AIChat />
