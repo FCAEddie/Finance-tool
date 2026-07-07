@@ -2982,8 +2982,8 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [page, setPage] = useState("dashboard");
   const [projOverrides, setProjOverrides] = useState({});
-  const [projHistory, setProjHistory] = React.useRef([]);   // undo stack
-  const [projFuture, setProjFuture] = React.useRef([]);     // redo stack
+  const projHistory = React.useRef([]);                     // undo stack
+  const projFuture = React.useRef([]);                      // redo stack
 
   // History-aware setter — call this instead of setProjOverrides directly
   const setProjOverridesWithHistory = (updater) => {
