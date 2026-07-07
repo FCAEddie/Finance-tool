@@ -91,9 +91,11 @@ const getLeafEffective = (row, year, monthIdx, projOverrides, approvedItems, rol
 const computeEffective = (rowIdx, year, monthIdx, projOverrides, approvedItems, rolledItems) => {
   const row = UNIFIED_PL[rowIdx];
   if (!row) return 0;
+  // Actuals: always use pre-computed QB data
   if (isActualMonth(year, monthIdx)) return getRowData(row, year)?.[monthIdx] ?? 0;
+  // Leaf GL: use plan baseline + overrides + scenario adds
   if (isLeafGL(row.a)) return getLeafEffective(row, year, monthIdx, projOverrides, approvedItems, rolledItems);
-  // Find direct children
+  // Non-leaf: find direct forward children (rows at indent+1 immediately after)
   const children = [];
   for (let ci = rowIdx + 1; ci < UNIFIED_PL.length; ci++) {
     if (UNIFIED_PL[ci].i <= row.i) break;
@@ -101,6 +103,61 @@ const computeEffective = (rowIdx, year, monthIdx, projOverrides, approvedItems, 
   }
   if (children.length > 0) {
     return children.reduce((s, ci) => s + computeEffective(ci, year, monthIdx, projOverrides, approvedItems, rolledItems), 0);
+  }
+  // No forward children — this is a Total/aggregate row.
+  const ce = (idx) => computeEffective(idx, year, monthIdx, projOverrides, approvedItems, rolledItems);
+  // ── Pure formula rows (computed as arithmetic, not section sums) ──
+  if (rowIdx === 85)  return ce(43) - ce(84);       // Gross Profit  = Revenue − COGS
+  if (rowIdx === 206) return ce(85) - ce(205);      // NOI           = GP − Expenses
+  if (rowIdx === 218) return -ce(217);              // Net Other Income
+  if (rowIdx === 219) return ce(206) - ce(217);     // Net Income    = NOI − OtherExp
+  // ── General backward-search for ALL "Total X" rows at any level ──
+  // A "Total X" row in UNIFIED_PL has NO forward children; its section is BEFORE it.
+  // Strategy: find the nearest preceding sibling (same indent, not a Total), then sum:
+  //   (a) the direct leaf-GL value of that sibling header, and
+  //   (b) for each i+1 child between header and this Total row:
+  //       - include "Total Y" sub-rows (they aggregate their own sub-section)
+  //       - include non-total leaf GLs that have NO "Total" counterpart in the range
+  //       - skip non-total leaf GLs that DO have a "Total" counterpart (avoids double-count)
+  if (isTotal(row.a) || isHeader(row.a)) {
+    // Find nearest preceding row at same indent that is NOT a total/formula row
+    let headerIdx = -1;
+    for (let pi = rowIdx - 1; pi >= 0; pi--) {
+      if (UNIFIED_PL[pi].i < row.i) break;
+      if (UNIFIED_PL[pi].i === row.i && !isTotal(UNIFIED_PL[pi].a)) { headerIdx = pi; break; }
+    }
+    if (headerIdx >= 0) {
+      const hRow = UNIFIED_PL[headerIdx];
+      const childIndent = row.i + 1;
+      // Collect direct i+1 children between header and this total
+      const rangeCi = [];
+      for (let ci = headerIdx + 1; ci < rowIdx; ci++) {
+        if (UNIFIED_PL[ci].i === childIndent) rangeCi.push(ci);
+      }
+      // Build set of "Total X" names that exist in range — used to detect double-count
+      const totalNamesInRange = new Set(
+        rangeCi.filter(ci => isTotal(UNIFIED_PL[ci].a)).map(ci => UNIFIED_PL[ci].a)
+      );
+      let sum = 0;
+      // Header's own direct leaf-GL value (e.g. "800000 Sales" direct entries)
+      if (isLeafGL(hRow.a)) {
+        sum += getLeafEffective(hRow, year, monthIdx, projOverrides, approvedItems, rolledItems);
+      }
+      for (const ci of rangeCi) {
+        const cr = UNIFIED_PL[ci];
+        if (isTotal(cr.a)) {
+          // Always include Total sub-rows
+          sum += ce(ci);
+        } else {
+          // Include non-total rows ONLY if no "Total cr.a" sibling exists in range
+          // (if a "Total" counterpart exists, the non-total is already inside it)
+          if (!totalNamesInRange.has("Total " + cr.a)) {
+            sum += ce(ci);
+          }
+        }
+      }
+      return sum;
+    }
   }
   return getRowData(row, year)?.[monthIdx] ?? 0;
 };
@@ -119,7 +176,9 @@ const computeLiveKPIs = (year, projOverrides, approvedItems, rolledItems) => {
     const da   = computeEffective(LIVE_KPI_ROWS.da,   year, m, projOverrides, approvedItems, rolledItems);
     const ni   = computeEffective(LIVE_KPI_ROWS.ni,   year, m, projOverrides, approvedItems, rolledItems);
     const ebitda = ni + da;
-    return { rev, cogs, gp, exp, da, ni, ebitda };
+    const fcf = ni + da;
+    const ebit = ebitda - da;
+    return { rev, cogs, gp, exp, da, ni, ebitda, fcf, ebit };
   });
 };
 
@@ -1256,7 +1315,7 @@ function Projections({ projOverrides, setProjOverrides, approvedItems, rolledIte
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Projections</h2>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          {[2026, 2027, 2028].map(yr => (
+          {YEARS.map(yr => (
             <button key={yr} onClick={() => setYear(yr)}
               style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${year === yr ? C.accent : C.cardBorder}`,
                 background: year === yr ? C.accent : "transparent", color: C.actual, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
@@ -1860,7 +1919,7 @@ function WishListForm({ item, onSave, onCancel }) {
           <select value={form.startYear || 2026} onChange={e => set("startYear", Number(e.target.value))}
             style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
               padding: "6px 10px", color: C.text, fontSize: 13 }}>
-            {[2026,2027,2028].map(y => <option key={y} value={y}>{y}</option>)}
+            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div>
@@ -1876,7 +1935,7 @@ function WishListForm({ item, onSave, onCancel }) {
           <select value={form.endYear || 2028} onChange={e => set("endYear", Number(e.target.value))}
             style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 6,
               padding: "6px 10px", color: C.text, fontSize: 13 }}>
-            {[2026,2027,2028].map(y => <option key={y} value={y}>{y}</option>)}
+            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div>
@@ -1950,7 +2009,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
   }, 0);
 
   const baseKPIs = (yr) => getAnnualKPIs(yr);
-  const YEARS3 = [2026, 2027, 2028];
+  const YEARS3 = YEARS;
 
   const priorityColors = {
     "Keep Lights On": C.accentLight,
