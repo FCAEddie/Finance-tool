@@ -1075,7 +1075,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
                   }}>
                     {/* Account name cell */}
                     <td style={{ padding: "7px 12px", color: isHead ? C.textDim : C.text, paddingLeft: 12 + i * 14,
-                      position: "sticky", left: 0, background: isTot ? "#0e1f45" : isHead ? "#0b1830" : C.card, zIndex: 5 }}>
+                      position: "sticky", left: 0, background: isTot ? C.totalBg : isHead ? C.accentSoft : C.card, zIndex: 5 }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                         {hasChildren && (
                           <button onClick={() => toggle(a)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", padding: 0, lineHeight: 1 }}>
