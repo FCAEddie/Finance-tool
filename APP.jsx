@@ -2932,8 +2932,9 @@ function App() {
     <ThemeCtx.Provider value={C}>
     <>
     <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
       * { box-sizing: border-box; }
-      body { margin: 0; background: #eef1f6; }
+      body { margin: 0; background: #eef1f6; font-family: 'Poppins', sans-serif; }
       [data-fs="lg"] * { font-size: 16px !important; }
       [data-fs="lg"] h1, [data-fs="lg"] h2, [data-fs="lg"] h3 { font-size: 21px !important; }
       button { font-family: inherit; }
@@ -2943,7 +2944,7 @@ function App() {
       ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.7); }
       input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     `}</style>
-    <div style={{ display: "flex", height: "100vh", background: C.bg, fontFamily: "'Inter', system-ui, sans-serif", color: C.text, overflow: "hidden" }} data-fs="lg">
+    <div style={{ display: "flex", height: "100vh", background: C.bg, fontFamily: "'Poppins', sans-serif", color: C.text, overflow: "hidden" }} data-fs="lg">
 
       {/* ── Sidebar ── */}
       <div style={{
