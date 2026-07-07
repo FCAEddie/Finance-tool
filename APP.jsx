@@ -36,7 +36,7 @@ const PLAN_2026 = {
 // ─── Constants & Config ───────────────────────────────────────────────────────
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const ACTUALS_THRU = 4; // Jan–May (index 0–4) are actual; index 5+ are projections
-const YEARS = [2026, 2027, 2028];
+const YEARS = [2026, 2027, 2028, 2029, 2030];
 
 // ─── Utility Helpers ──────────────────────────────────────────────────────────
 const fmt = (n) => {
@@ -47,7 +47,7 @@ const pct = (n) => n == null ? "—" : `${(n * 100).toFixed(1)}%`;
 const varColor = (v) => v > 0 ? C.positive : v < 0 ? C.negative : C.textDim;
 const sum = (arr) => arr ? arr.reduce((a, b) => a + (b || 0), 0) : 0;
 const isActualMonth = (yr, mi) => yr === 2026 && mi <= ACTUALS_THRU;
-const getRowData = (row, year) => year === 2026 ? row.v26 : year === 2027 ? row.v27 : row.v28;
+const getRowData = (row, year) => year === 2026 ? row.v26 : year === 2027 ? row.v27 : year === 2028 ? row.v28 : row.v28;
 const isTotal = (a) => a.startsWith("Total ") || a === "Gross Profit" || a === "Net Income" || a === "Net Operating Income" || a === "Total Other Expenses";
 const isHeader = (a) => ["Income","Cost of Goods Sold","Expenses","Other Expenses","Net Other Income"].includes(a) || a.startsWith("Check");
 const displayLabel = (a) => a === "Other Expenses" ? "Depreciation & Amortization" : a;
@@ -58,7 +58,7 @@ const isLeafGL = (a) => /^\d{5,6}\s/.test(a);
 const isInPeriod = (item, year, monthIdx) => {
   const sy = parseInt(item.startYear) || 2026;
   const sm = Math.max(0, MONTHS.indexOf(item.startMonth || "Jan"));
-  const ey = parseInt(item.endYear) || 2028;
+  const ey = parseInt(item.endYear) || 2030;
   const em2 = MONTHS.indexOf(item.endMonth || "Dec");
   const em = em2 >= 0 ? em2 : 11;
   const cur = year * 12 + monthIdx;
@@ -808,8 +808,6 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
   const [modal, setModal] = useState(null);
   const [editingCell, setEditingCell] = useState(null);
   const [rollForwardPrompt, setRollForwardPrompt] = useState(null);
-  const [plView, setPlView] = useState('consolidated'); // 'consolidated' | 'by-source'
-
   const applyRollForward = (scope) => {
     if (!rollForwardPrompt) return;
     const { rowA, year: rfYear, monthIdx, value } = rollForwardPrompt;
@@ -824,7 +822,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
         }
       }
       if (scope === "all") {
-        for (const futureYear of [2027, 2028]) {
+        for (const futureYear of [2027, 2028, 2029, 2030]) {
           for (let m = 0; m < 12; m++) {
             updated[rowA][`${futureYear}_${m}`] = value;
           }
@@ -898,16 +896,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Full P&L</h2>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Source toggle */}
-          <div style={{ display:"flex", border:`1px solid ${C.cardBorder}`, borderRadius:8, overflow:"hidden", marginRight:4 }}>
-            {[['consolidated','Consolidated'],['by-source','Legacy · Freedom']].map(([mode,label]) => (
-              <button key={mode} onClick={() => setPlView(mode)}
-                style={{ padding:"6px 14px", border:"none", background: plView===mode ? C.accent : "transparent",
-                  color: plView===mode ? "#fff" : C.textDim, cursor:"pointer", fontSize:12, fontWeight:600, transition:"all .15s" }}>
-                {label}
-              </button>
-            ))}
-          </div>
+
           {YEARS.map(yr => (
             <button key={yr} onClick={() => setYear(yr)}
               style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${year === yr ? C.accent : C.cardBorder}`,
@@ -930,113 +919,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
         Click any cell to see detail
       </div>
 
-      {/* ── By-Source Split View ──────────────────────────────────────── */}
-      {plView === 'by-source' && (() => {
-        const activeMos = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-        const revRows = UNIFIED_PL.filter(r => r.i === 1 && r.type === "revenue" && !r.a.startsWith("Total"));
-        const expRows = UNIFIED_PL.filter(r => r.i === 1 && r.type === "expense" && !r.a.startsWith("Total"));
-
-        const getMonthly = (rows) => activeMos.map((_, mi) =>
-          rows.reduce((s, r) => s + (computeEffective(r, year, mi, projOverrides, approvedItems, rolledItems) || 0), 0)
-        );
-        const revMo = getMonthly(revRows);
-        const expMo = getMonthly(expRows);
-        const gpMo  = revMo.map((v, i) => v - expMo[i]);
-        const ytd = arr => arr.slice(0, year === 2026 ? ACTUALS_THRU + 1 : 12).reduce((s,v)=>s+v,0);
-        const fyt = arr => arr.reduce((s,v)=>s+v,0);
-
-        const thS = { padding:"9px 10px", textAlign:"right", fontSize:11, fontWeight:700,
-          textTransform:"uppercase", letterSpacing:".4px", color:C.textDim,
-          borderBottom:`2px solid ${C.cardBorder}`, background:C.card, whiteSpace:"nowrap" };
-        const tdR = (bold) => ({ padding:"8px 10px", textAlign:"right", fontSize:13,
-          fontWeight:bold?700:400, color:C.actual, borderBottom:`1px solid ${C.cardBorder}` });
-        const tdL = (indent, bold) => ({ padding:`8px 10px 8px ${10+indent*14}px`, fontSize:13,
-          fontWeight:bold?700:400, color:bold?C.actual:C.textDim, borderBottom:`1px solid ${C.cardBorder}` });
-
-        const Band = ({ label, color, sub }) => (
-          <tr>
-            <td colSpan={activeMos.length + (year===2026?3:2)}
-              style={{ padding:"9px 14px", background:color }}>
-              <span style={{ fontWeight:700, fontSize:13, color:"#fff" }}>{label}</span>
-              {sub && <span style={{ fontSize:11, color:"rgba(255,255,255,.65)", marginLeft:8 }}>{sub}</span>}
-            </td>
-          </tr>
-        );
-
-        const DataRow = ({ row }) => {
-          const vals = activeMos.map((_, mi) => computeEffective(row, year, mi, projOverrides, approvedItems, rolledItems) || 0);
-          return (
-            <tr>
-              <td style={tdL(1, false)}>{displayLabel(row.a)}</td>
-              {year===2026 && <td style={tdR(false)}>{fmt(ytd(vals))}</td>}
-              {vals.map((v,i) => <td key={i} style={tdR(false)}>{fmt(v)}</td>)}
-              <td style={tdR(false)}>{fmt(fyt(vals))}</td>
-            </tr>
-          );
-        };
-
-        const TotRow = ({ label, arr, grand }) => {
-          const bg = grand ? C.accent : C.totalBg;
-          const fg = grand ? "#fff" : C.actual;
-          const bdr = `2px solid ${C.cardBorder}`;
-          return (
-            <tr style={{ background:bg }}>
-              <td style={{ padding:"10px 10px", fontWeight:700, fontSize:13, color:fg, borderTop:bdr }}>{label}</td>
-              {year===2026 && <td style={{ padding:"10px 10px", textAlign:"right", fontWeight:700, color:fg, borderTop:bdr }}>{fmt(ytd(arr))}</td>}
-              {arr.map((v,i) => <td key={i} style={{ padding:"10px 10px", textAlign:"right", fontWeight:700, color:fg, borderTop:bdr }}>{fmt(v)}</td>)}
-              <td style={{ padding:"10px 10px", textAlign:"right", fontWeight:700, color:fg, borderTop:bdr }}>{fmt(fyt(arr))}</td>
-            </tr>
-          );
-        };
-
-        const MgnRow = ({ label, num, den }) => {
-          const vals = num.map((v,i) => den[i] ? (v/den[i]*100).toFixed(1)+"%" : "—");
-          const ytdV = ytd(den) ? (ytd(num)/ytd(den)*100).toFixed(1)+"%" : "—";
-          const fyV  = fyt(den) ? (fyt(num)/fyt(den)*100).toFixed(1)+"%" : "—";
-          return (
-            <tr>
-              <td style={{ ...tdL(2,false), fontStyle:"italic", fontSize:12, color:C.textDim }}>{label}</td>
-              {year===2026 && <td style={{ padding:"5px 10px", textAlign:"right", fontSize:12, color:C.textDim, borderBottom:`1px solid ${C.cardBorder}` }}>{ytdV}</td>}
-              {vals.map((v,i) => <td key={i} style={{ padding:"5px 10px", textAlign:"right", fontSize:12, color:C.textDim, borderBottom:`1px solid ${C.cardBorder}` }}>{v}</td>)}
-              <td style={{ padding:"5px 10px", textAlign:"right", fontSize:12, color:C.textDim, borderBottom:`1px solid ${C.cardBorder}` }}>{fyV}</td>
-            </tr>
-          );
-        };
-
-        return (
-          <div style={{ overflowX:"auto", borderRadius:10, border:`1px solid ${C.cardBorder}`, background:C.card, boxShadow:C.shadow }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", minWidth:900 }}>
-              <thead>
-                <tr>
-                  <th style={{ ...thS, textAlign:"left", minWidth:220 }}>Line Item</th>
-                  {year===2026 && <th style={{ ...thS, background:C.accentSoft, color:C.accent }}>YTD</th>}
-                  {activeMos.map(m => <th key={m} style={thS}>{m}</th>)}
-                  <th style={thS}>FY Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <Band label="Freedom QB" color="#0B5CAB" sub="Revenue" />
-                {revRows.map(r => <DataRow key={r.a} row={r} />)}
-                <TotRow label="Total Revenue" arr={revMo} />
-                <MgnRow label="Revenue mix shown above" num={revMo} den={revMo} />
-
-                <Band label="Legacy QB" color="#92400E" sub="COGS · Operating Expenses" />
-                {expRows.map(r => <DataRow key={r.a} row={r} />)}
-                <TotRow label="Total COGS + Expenses" arr={expMo} />
-
-                <Band label="Consolidated" color="#032D60" sub="Net of both accounts" />
-                <TotRow label="Gross Profit" arr={gpMo} />
-                <MgnRow label="Gross Margin %" num={gpMo} den={revMo} />
-                <TotRow label="Net Income" arr={gpMo} grand />
-                <MgnRow label="Net Margin %" num={gpMo} den={revMo} />
-              </tbody>
-            </table>
-          </div>
-        );
-      })()}
-
       {/* ── Consolidated Full P&L ────────────────────────────────────────── */}
-      {plView === 'consolidated' && <>
       {/* Table */}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -1146,8 +1029,6 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
           </table>
         </div>
       </Card>
-      </> }
-
       {/* Roll Forward Prompt */}
       {rollForwardPrompt && (
         <div style={{ position: "fixed", bottom: 20, right: 20, background: C.card, border: `1px solid ${C.accent}`, borderRadius: 10, padding: 16, zIndex: 1000, boxShadow: "0 4px 20px rgba(0,0,0,0.3)", maxWidth: 320 }}>
@@ -2403,25 +2284,42 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
     return monthly.map(m => m.ebitda);
   }, [year, projOverrides, approvedItems, rolledItems]);
 
-  // Adj items: scenario items that affect EBITDA + manual overrides
-  const adjItems = useMemo(() => {
-    const items = [];
-    (approvedItems || []).forEach(item => {
-      if (item.glCode) {
-        items.push({
-          id: item.id, label: item.name, glCode: item.glCode,
-          annualCost: item.annualCost || 0, startYear: item.startYear, endYear: item.endYear,
-          startMonth: item.startMonth, endMonth: item.endMonth, source: "scenario",
-        });
-      }
+  // Adj items: fully manual — stored in adjOverrides (array of items)
+  const adjItems = adjOverrides || [];
+  const setAdjItems = (updater) => {
+    setAdjOverrides(prev => {
+      const cur = prev || [];
+      return typeof updater === "function" ? updater(cur) : updater;
     });
-    return items;
-  }, [approvedItems]);
+  };
+
+  // State for the add-item form
+  const [showAddForm, setShowAddForm] = React.useState(false);
+  const [newItem, setNewItem] = React.useState({
+    label: "", glCode: "", annualCost: "", startYear: "2026", startMonth: "Jan", endYear: "2030", endMonth: "Dec"
+  });
+
+  const handleAddItem = () => {
+    if (!newItem.label || !newItem.annualCost) return;
+    const item = {
+      id: Date.now().toString(),
+      label: newItem.label,
+      glCode: newItem.glCode,
+      annualCost: parseFloat(newItem.annualCost) || 0,
+      startYear: newItem.startYear, startMonth: newItem.startMonth,
+      endYear: newItem.endYear, endMonth: newItem.endMonth,
+    };
+    setAdjItems(prev => [...prev, item]);
+    setNewItem({ label: "", glCode: "", annualCost: "", startYear: "2026", startMonth: "Jan", endYear: "2030", endMonth: "Dec" });
+    setShowAddForm(false);
+  };
+
+  const handleDeleteItem = (id) => setAdjItems(prev => prev.filter(x => x.id !== id));
 
   const getMonthlyAdj = (item, yr, m) => {
     const sy = parseInt(item.startYear) || 2026;
     const sm = MONTHS.indexOf(item.startMonth || "Jan");
-    const ey = parseInt(item.endYear) || 2028;
+    const ey = parseInt(item.endYear) || 2030;
     const em = MONTHS.indexOf(item.endMonth || "Dec");
     const inRange = (yr > sy || (yr === sy && m >= sm)) && (yr < ey || (yr === ey && m <= em));
     return inRange ? (item.annualCost || 0) / 12 : 0;
@@ -2464,7 +2362,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         {[
           { label: "Base EBITDA", value: totalBase, sub: `FY ${year}` },
-          { label: "Total Adj Items", value: -totalAdjItems, sub: `${adjItems.length} scenario items`, neg: true },
+          { label: "Total Adj Items", value: -totalAdjItems, sub: `${adjItems.length} manual item${adjItems.length !== 1 ? "s" : ""}`, neg: true },
           { label: "Adj. EBITDA", value: totalAdj, sub: "After adjustments", highlight: true },
         ].map((k, i) => (
           <Card key={i} style={{ padding: 16, textAlign: "center" }}>
@@ -2496,16 +2394,60 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
 
       {/* Adj Items Table */}
       <Card>
-        <div style={{ color: C.actual, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>
-          Adjustment Items
-          {adjItems.length === 0 && <span style={{ color: C.textDim, fontSize: 12, fontWeight: 400, marginLeft: 8 }}>No approved scenario items — approve items in Scenarios to see adjustments here.</span>}
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ color: C.actual, fontWeight: 600, fontSize: 15 }}>Adjustment Items</div>
+          <button onClick={() => setShowAddForm(v => !v)}
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
+              background: C.accent, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            <Plus size={13} /> Add Item
+          </button>
         </div>
+
+        {/* Add form */}
+        {showAddForm && (
+          <div style={{ background: C.accentSoft, border: `1px solid ${C.cardBorder}`, borderRadius: 10, padding: 16, marginBottom: 16, display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
+            {[
+              { label: "Description", key: "label", type: "text", placeholder: "e.g. One-time legal fee" },
+              { label: "GL Code", key: "glCode", type: "text", placeholder: "Optional" },
+              { label: "Annual Amount ($)", key: "annualCost", type: "number", placeholder: "0" },
+              { label: "Start Year", key: "startYear", type: "text", placeholder: "2026" },
+              { label: "Start Month", key: "startMonth", type: "text", placeholder: "Jan" },
+              { label: "End Year", key: "endYear", type: "text", placeholder: "2030" },
+              { label: "End Month", key: "endMonth", type: "text", placeholder: "Dec" },
+            ].map(({ label, key, type, placeholder }) => (
+              <div key={key}>
+                <div style={{ color: C.textDim, fontSize: 10, fontWeight: 600, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</div>
+                <input type={type} placeholder={placeholder} value={newItem[key]}
+                  onChange={e => setNewItem(prev => ({ ...prev, [key]: e.target.value }))}
+                  style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: `1px solid ${C.cardBorder}`,
+                    background: C.card, color: C.text, fontSize: 12 }} />
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 6, paddingTop: 16 }}>
+              <button onClick={handleAddItem}
+                style={{ padding: "6px 14px", background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                Save
+              </button>
+              <button onClick={() => setShowAddForm(false)}
+                style={{ padding: "6px 10px", background: "transparent", color: C.textDim, border: `1px solid ${C.cardBorder}`, borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {adjItems.length === 0 && !showAddForm && (
+          <div style={{ color: C.textDim, fontSize: 13, padding: "16px 0", textAlign: "center" }}>
+            No adjustment items yet — click <strong>Add Item</strong> to create a manual entry.
+          </div>
+        )}
+
         {adjItems.length > 0 && (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: C.headerBg }}>
-                {["Item", "GL Code", "Annual Cost", "Active Period", "Source"].map(h => (
-                  <th key={h} style={{ padding: "8px 12px", color: C.textDim, fontWeight: 600, textAlign: h === "Annual Cost" ? "right" : "left", borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
+                {["Description", "GL Code", "Annual Amount", "Active Period", ""].map(h => (
+                  <th key={h} style={{ padding: "8px 12px", color: C.textDim, fontWeight: 600, textAlign: h === "Annual Amount" ? "right" : "left", borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -2513,13 +2455,14 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
               {adjItems.map((item, i) => (
                 <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: i % 2 === 0 ? "transparent" : `${C.cardBorder}22` }}>
                   <td style={{ padding: "8px 12px", color: C.actual }}>{item.label}</td>
-                  <td style={{ padding: "8px 12px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode}</td>
+                  <td style={{ padding: "8px 12px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode || "—"}</td>
                   <td style={{ padding: "8px 12px", textAlign: "right", color: C.negative, fontWeight: 600 }}>{fmt(item.annualCost)}/yr</td>
                   <td style={{ padding: "8px 12px", color: C.textDim }}>{item.startMonth} {item.startYear} – {item.endMonth} {item.endYear}</td>
-                  <td style={{ padding: "8px 12px" }}>
-                    <span style={{ background: `${C.accent}22`, color: C.accent, border: `1px solid ${C.accent}44`, borderRadius: 4, padding: "2px 7px", fontSize: 10, fontWeight: 600 }}>
-                      {item.source}
-                    </span>
+                  <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                    <button onClick={() => handleDeleteItem(item.id)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: C.negative, padding: "2px 6px", borderRadius: 4 }}>
+                      <X size={13} />
+                    </button>
                   </td>
                 </tr>
               ))}
