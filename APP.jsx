@@ -44,10 +44,9 @@ const fmt = (n) => {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 };
 const pct = (n) => n == null ? "—" : `${(n * 100).toFixed(1)}%`;
-const varColor = (v) => v > 0 ? C.positive : v < 0 ? C.negative : C.textDim;
 const sum = (arr) => arr ? arr.reduce((a, b) => a + (b || 0), 0) : 0;
 const isActualMonth = (yr, mi) => yr === 2026 && mi <= ACTUALS_THRU;
-const getRowData = (row, year) => year === 2026 ? row.v26 : year === 2027 ? row.v27 : year === 2028 ? row.v28 : row.v28;
+const getRowData = (row, year) => year === 2026 ? row.v26 : year === 2027 ? row.v27 : row.v28;
 const isTotal = (a) => a.startsWith("Total ") || a === "Gross Profit" || a === "Net Income" || a === "Net Operating Income" || a === "Total Other Expenses";
 const isHeader = (a) => ["Income","Cost of Goods Sold","Expenses","Other Expenses","Net Other Income"].includes(a) || a.startsWith("Check");
 const displayLabel = (a) => a === "Other Expenses" ? "Depreciation & Amortization" : a;
@@ -615,7 +614,7 @@ function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
   const ytdRev    = sum(ytdMonths, "rev");
   const ytdCogs   = sum(ytdMonths, "cogs");
   const ytdGP     = sum(ytdMonths, "gp");
-  const ytdOpex   = sum(ytdMonths, "opex");
+  const ytdOpex   = sum(ytdMonths, "exp");
   const ytdEbitda = sum(ytdMonths, "ebitda");
   const ytdNI     = sum(ytdMonths, "ni");
 
@@ -631,7 +630,7 @@ function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
   const fyRev     = sum(fyMonths, "rev");
   const fyCogs    = sum(fyMonths, "cogs");
   const fyGP      = sum(fyMonths, "gp");
-  const fyOpex    = sum(fyMonths, "opex");
+  const fyOpex    = sum(fyMonths, "exp");
   const fyEbitda  = sum(fyMonths, "ebitda");
   const fyNI      = sum(fyMonths, "ni");
   const fyPlanRev    = (PLAN_2026.rev  || []).reduce((s,v)=>s+(v??0),0);
@@ -2009,7 +2008,9 @@ const applyScenarioDriversToOverrides = (drivers, baseDrivers) => {
   const getBaseline = (row, year, monthIdx) => {
     const data = getRowData(row, year);
     let base = data?.[monthIdx];
-    if ((base === null || base === undefined) && year === 2026) {
+    // If plan data is missing for this month (null), fall back to Jan-May 2026 actuals average.
+    // This applies to all years (2026 projection months and 2027-2030 where v27/v28 may be null).
+    if (base === null || base === undefined) {
       const acts = (row.v26 || []).slice(0, ACTUALS_THRU + 1).filter(v => v != null);
       base = acts.length > 0 ? acts.reduce((s, v) => s + v, 0) / acts.length : 0;
     }
@@ -2153,14 +2154,19 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
   };
   const cycleStatus = id => {
     const order = ["pending", "approved", "plan"];
-    setWishList(prev => (prev || WISH_LIST).map(w => {
-      if (w.id !== id || w.status === "rejected") return w;
-      const next = order[(order.indexOf(w.status) + 1) % order.length];
-      return { ...w, status: next };
-    }));
+    setWishList(prev => {
+      const updated = (prev || WISH_LIST).map(w => {
+        if (w.id !== id || w.status === "rejected") return w;
+        const next = order[(order.indexOf(w.status) + 1) % order.length];
+        return { ...w, status: next };
+      });
+      // Keep approvedItemIds in sync: "plan" items flow into projections
+      setApprovedIds(new Set(updated.filter(w => w.status === "plan").map(w => w.id)));
+      return updated;
+    });
   };
 
-  const card = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12 };
+  const card = { background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12 };
   const secLabel = { fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: C.textDim, marginBottom: 10 };
   const isBase = activeScenario === "base";
   const curStatus = scenarioStatus?.[activeScenario] || "draft";
@@ -2198,12 +2204,12 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Scenarios</h2>
-        <div style={{ display: "flex", border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+        <div style={{ display: "flex", border: `1px solid ${C.cardBorder}`, borderRadius: 8, overflow: "hidden" }}>
           {["planning", "comparison", "waterfall"].map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               padding: "6px 14px", fontSize: 12, fontWeight: tab === t ? 600 : 400,
               background: tab === t ? C.accentSoft : C.card, color: tab === t ? C.accent : C.textDim,
-              border: "none", borderRight: `1px solid ${C.border}`, cursor: "pointer",
+              border: "none", borderRight: `1px solid ${C.cardBorder}`, cursor: "pointer",
             }}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
           ))}
         </div>
@@ -2215,7 +2221,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
           const delta = k.val - k.base;
           const pctAbs = k.base !== 0 ? Math.abs((delta / Math.abs(k.base)) * 100).toFixed(1) : 0;
           return (
-            <div key={k.label} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px" }}>
+            <div key={k.label} style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 10, padding: "12px 14px" }}>
               <div style={{ fontSize: 11, color: C.textDim, marginBottom: 4 }}>{k.label}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: C.actual }}>{fmtM(k.val)}</div>
               {!isBase && <div style={{ fontSize: 11, fontWeight: 600, color: dc(delta, k.flip), marginTop: 2 }}>
@@ -2253,7 +2259,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
               <button style={{
                 display: "flex", alignItems: "center", gap: 6, width: "100%", marginTop: 8,
                 padding: "7px 10px", fontSize: 12, color: C.textDim, cursor: "pointer",
-                borderRadius: 8, border: `1px dashed ${C.border}`, background: "none",
+                borderRadius: 8, border: `1px dashed ${C.cardBorder}`, background: "none",
               }}>＋ New version</button>
             </div>
 
@@ -2264,7 +2270,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                 const pt = priorityTag(item.priority);
                 const st = statusTag(item.status);
                 return (
-                  <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 0", borderBottom: `1px solid ${C.border}` }}>
+                  <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 0", borderBottom: `1px solid ${C.cardBorder}` }}>
                     <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 20, fontWeight: 600, background: pt.bg, color: pt.color, flexShrink: 0, maxWidth: 72, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={item.priority}>{item.priority.split(" ")[0]}</span>
                     <span style={{ flex: 1, fontSize: 12, color: C.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={item.name}>{item.name}</span>
                     <span style={{ fontSize: 11, color: C.textDim, flexShrink: 0 }}>{item.annualCost > 0 ? "+" + fmt(item.annualCost) : "TBD"}</span>
@@ -2273,7 +2279,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                 );
               })}
               {items.length > 10 && <div style={{ fontSize: 11, color: C.textDim, marginTop: 8, textAlign: "center" }}>+{items.length - 10} more items</div>}
-              <button style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", marginTop: 10, padding: "7px 10px", fontSize: 12, color: C.textDim, cursor: "pointer", borderRadius: 8, border: `1px dashed ${C.border}`, background: "none" }}>＋ Add item</button>
+              <button style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", marginTop: 10, padding: "7px 10px", fontSize: 12, color: C.textDim, cursor: "pointer", borderRadius: 8, border: `1px dashed ${C.cardBorder}`, background: "none" }}>＋ Add item</button>
             </div>
           </div>
 
@@ -2326,12 +2332,12 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                   const diff = val - bVal;
                   const locked = isBase || inputsLocked;
                   return (
-                    <div key={key} style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}`, opacity: locked ? 0.7 : 1 }}>
+                    <div key={key} style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.cardBorder}`, opacity: locked ? 0.7 : 1 }}>
                       <div style={{ fontSize: 11, color: C.textDim, marginBottom: 6 }}>{label}</div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <input type="number" value={step < 1 ? val : Math.round(val)} step={step} disabled={locked}
                           onChange={e => updateDriver(key, e.target.value)}
-                          style={{ width: 72, padding: "4px 8px", fontSize: 13, textAlign: "right", border: `1px solid ${C.border}`, borderRadius: 6, background: locked ? C.bg : C.card, color: C.actual, fontFamily: "inherit" }}
+                          style={{ width: 72, padding: "4px 8px", fontSize: 13, textAlign: "right", border: `1px solid ${C.cardBorder}`, borderRadius: 6, background: locked ? C.bg : C.card, color: C.actual, fontFamily: "inherit" }}
                         />
                         <span style={{ fontSize: 11, color: C.textDim }}>{unit}</span>
                         {!isBase && Math.abs(diff) > 0.001 && (
@@ -2354,9 +2360,9 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: "left", padding: "5px 8px", borderBottom: `1px solid ${C.border}`, color: C.textDim, fontWeight: 500, fontSize: 11, width: "38%" }}></th>
+                    <th style={{ textAlign: "left", padding: "5px 8px", borderBottom: `1px solid ${C.cardBorder}`, color: C.textDim, fontWeight: 500, fontSize: 11, width: "38%" }}></th>
                     {["Base", activeScenDef.name, "Δ"].map(h => (
-                      <th key={h} style={{ textAlign: "right", padding: "5px 8px", borderBottom: `1px solid ${C.border}`, color: C.textDim, fontWeight: 500, fontSize: 11 }}>{h}</th>
+                      <th key={h} style={{ textAlign: "right", padding: "5px 8px", borderBottom: `1px solid ${C.cardBorder}`, color: C.textDim, fontWeight: 500, fontSize: 11 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -2366,10 +2372,10 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                     const dColor = dc(delta, row.flip);
                     return (
                       <tr key={row.label} style={{ background: row.isTotal ? C.accentSoft : "transparent" }}>
-                        <td style={{ padding: "6px 8px", borderBottom: `1px solid ${C.border}`, color: row.isTotal ? C.accent : C.textDim, fontWeight: row.isTotal ? 600 : 400 }}>{row.label}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: row.isTotal ? C.accent : C.text }}>{fmtM(row.base)}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: row.isTotal ? C.accent : C.text }}>{fmtM(row.scen)}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: dColor, fontWeight: 600 }}>
+                        <td style={{ padding: "6px 8px", borderBottom: `1px solid ${C.cardBorder}`, color: row.isTotal ? C.accent : C.textDim, fontWeight: row.isTotal ? 600 : 400 }}>{row.label}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.cardBorder}`, color: row.isTotal ? C.accent : C.text }}>{fmtM(row.base)}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.cardBorder}`, color: row.isTotal ? C.accent : C.text }}>{fmtM(row.scen)}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.cardBorder}`, color: dColor, fontWeight: 600 }}>
                           {delta > 0 ? "+" : delta < 0 ? "–" : ""}{fmtM(Math.abs(delta))}
                         </td>
                       </tr>
@@ -3008,7 +3014,7 @@ function App() {
     projFuture.current = projFuture.current.slice(1);
     setProjOverrides(cur => { projHistory.current = [...projHistory.current.slice(-49), cur]; return next; });
   };
-  const [adjOverrides, setAdjOverrides] = useState({});
+  const [adjOverrides, setAdjOverrides] = useState([]);
   const [wishListItems, setWishListItems] = useState(WISH_LIST);
   const [approvedItemIds, setApprovedItemIds] = useState(new Set(WISH_LIST.filter(w => w.status === "plan").map(w => w.id)));
   const [rolledItems, setRolledItems] = useState([]);
@@ -3145,7 +3151,7 @@ function App() {
         {page === "rev-vs-plan"  && <RevVsPlan projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-summary"  && <AvBSummary projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-detail"   && <AvBDetail projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
-        {page === "fullpl"       && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverrides} rolledItems={rolledItems} />}
+        {page === "fullpl"       && <FullPL onNav={handleNav} approvedItems={approvedItems} projOverrides={projOverrides} setProjOverrides={setProjOverridesWithHistory} rolledItems={rolledItems} />}
         {page === "projections"  && <Projections projOverrides={projOverrides} setProjOverrides={setProjOverridesWithHistory} undoProj={undoProjOverrides} redoProj={redoProjOverrides} projHistory={projHistory} projFuture={projFuture} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "scenarios"    && <Scenarios wishList={wishListItems} setWishList={setWishListItems} approvedIds={approvedItemIds} setApprovedIds={setApprovedItemIds} rolledItems={rolledItems} setRolledItems={setRolledItems} scenarioDrivers={scenarioDrivers} setScenarioDrivers={setScenarioDrivers} scenarioStatus={scenarioStatus} advanceScenarioStatus={advanceScenarioStatus} publishScenario={publishScenario} />}
         {page === "adj-ebitda"   && <AdjEbitda approvedItems={approvedItems} adjOverrides={adjOverrides} setAdjOverrides={setAdjOverrides} projOverrides={projOverrides} rolledItems={rolledItems} />}
