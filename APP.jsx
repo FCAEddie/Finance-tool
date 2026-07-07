@@ -2461,14 +2461,17 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
     const ey = parseInt(item.endYear) || 2030;
     const em = MONTHS.indexOf(item.endMonth || "Dec");
     const inRange = (yr > sy || (yr === sy && m >= sm)) && (yr < ey || (yr === ey && m <= em));
-    return inRange ? (item.annualCost || 0) / 12 : 0;
+    if (!inRange) return 0;
+    const actualKey = yr + "_" + m;
+    if (item.monthlyActuals?.[actualKey] !== undefined) return item.monthlyActuals[actualKey];
+    return (item.annualCost || 0) / 12;
   };
 
   const monthlyAdj = useMemo(() => Array.from({ length: 12 }, (_, m) =>
     adjItems.reduce((s, item) => s + getMonthlyAdj(item, year, m), 0)
   ), [adjItems, year]);
 
-  const adjEbitda = baseEbitda.map((v, i) => v - monthlyAdj[i]);
+  const adjEbitda = baseEbitda.map((v, i) => v + monthlyAdj[i]);
   const totalBase = baseEbitda.reduce((s, v) => s + v, 0);
   const totalAdj = adjEbitda.reduce((s, v) => s + v, 0);
   const totalAdjItems = monthlyAdj.reduce((s, v) => s + v, 0);
@@ -2501,12 +2504,12 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         {[
           { label: "Base EBITDA", value: totalBase, sub: `FY ${year}` },
-          { label: "Total Adj Items", value: -totalAdjItems, sub: `${adjItems.length} manual item${adjItems.length !== 1 ? "s" : ""}`, neg: true },
+          { label: "Total Addbacks", value: totalAdjItems, sub: `${adjItems.length} item${adjItems.length !== 1 ? "s" : ""}`, pos: true },
           { label: "Adj. EBITDA", value: totalAdj, sub: "After adjustments", highlight: true },
         ].map((k, i) => (
           <Card key={i} style={{ padding: 16, textAlign: "center" }}>
             <div style={{ color: C.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{k.label}</div>
-            <div style={{ color: k.highlight ? C.accent : k.neg ? C.negative : C.actual, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
+            <div style={{ color: k.highlight ? C.accent : k.pos ? C.positive : k.neg ? C.negative : C.actual, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
               {fmt(k.value)}
             </div>
             <div style={{ color: C.textDim, fontSize: 11 }}>{k.sub}</div>
@@ -2598,10 +2601,13 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
                   <td style={{ padding: "8px 12px", textAlign: "right", color: C.negative, fontWeight: 600 }}>{fmt(item.annualCost)}/yr</td>
                   <td style={{ padding: "8px 12px", color: C.textDim }}>{item.startMonth} {item.startYear} – {item.endMonth} {item.endYear}</td>
                   <td style={{ padding: "8px 12px", textAlign: "center" }}>
-                    <button onClick={() => handleDeleteItem(item.id)}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: C.negative, padding: "2px 6px", borderRadius: 4 }}>
-                      <X size={13} />
-                    </button>
+                    {item.locked
+                      ? <span style={{ fontSize: 11, color: C.textDim }}>🔒</span>
+                      : <button onClick={() => handleDeleteItem(item.id)}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: C.negative, padding: "2px 6px", borderRadius: 4 }}>
+                          <X size={13} />
+                        </button>
+                    }
                   </td>
                 </tr>
               ))}
@@ -2631,8 +2637,8 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
                   <tr key={m} style={{ background: i % 2 === 0 ? "transparent" : `${C.cardBorder}22`, borderBottom: `1px solid ${C.cardBorder}33` }}>
                     <td style={{ padding: "8px 12px", color: C.actual, fontWeight: isActual ? 600 : 400 }}>{m}{isActual ? " 🔒" : ""}</td>
                     <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{fmt(baseEbitda[i])}</td>
-                    <td style={{ padding: "8px 12px", textAlign: "right", color: monthlyAdj[i] > 0 ? C.negative : C.textDim }}>
-                      {monthlyAdj[i] > 0 ? `-${fmt(monthlyAdj[i])}` : "—"}
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: monthlyAdj[i] > 0 ? C.positive : C.textDim }}>
+                      {monthlyAdj[i] > 0 ? `+${fmt(monthlyAdj[i])}` : "—"}
                     </td>
                     <td style={{ padding: "8px 12px", textAlign: "right", color: adjEbitda[i] >= 0 ? C.actual : C.negative, fontWeight: 600 }}>{fmt(adjEbitda[i])}</td>
                     {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{planEbitda ? fmt(planEbitda[i]) : "—"}</td>}
@@ -2646,7 +2652,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
                 <td style={{ padding: "8px 12px", color: C.actual }}>Full Year</td>
                 <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{fmt(totalBase)}</td>
                 <td style={{ padding: "8px 12px", textAlign: "right", color: totalAdjItems > 0 ? C.negative : C.textDim }}>
-                  {totalAdjItems > 0 ? `-${fmt(totalAdjItems)}` : "—"}
+                  {totalAdjItems > 0 ? `+${fmt(totalAdjItems)}` : "—"}
                 </td>
                 <td style={{ padding: "8px 12px", textAlign: "right", color: totalAdj >= 0 ? C.actual : C.negative, fontWeight: 700 }}>{fmt(totalAdj)}</td>
                 {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{planEbitda ? fmt(planEbitda.reduce((s,v)=>s+v,0)) : "—"}</td>}
@@ -2661,6 +2667,46 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
     </div>
   );
 }
+
+// ─── Adj. EBITDA Addback items (pre-seeded from board presentation) ─────────────
+const ADJ_EBITDA_ITEMS = [
+  {
+    id: "mcscm-payroll",
+    label: "Montague Payroll (MCSCM)",
+    glCode: "601112 Montague Salary",
+    annualCost: 691596,
+    startYear: "2026", startMonth: "Jan", endYear: "2030", endMonth: "Dec",
+    locked: true,
+    monthlyActuals: {
+      "2026_0": 52067.40, "2026_1": 51100.35, "2026_2": 53323.16,
+      "2026_3": 53323.16, "2026_4": 53637.95,
+    },
+  },
+  {
+    id: "mcscm-expenses",
+    label: "Montague Expenses (MCSCM)",
+    glCode: "",
+    annualCost: 14820,
+    startYear: "2026", startMonth: "Jan", endYear: "2030", endMonth: "Dec",
+    locked: true,
+    monthlyActuals: {
+      "2026_0": 1166.67, "2026_1": 1166.67, "2026_2": 1166.67,
+      "2026_3": 1166.67, "2026_4": 1166.67,
+    },
+  },
+  {
+    id: "mcscm-health",
+    label: "Montague Health Insurance (MCSCM)",
+    glCode: "",
+    annualCost: 134844,
+    startYear: "2026", startMonth: "Jan", endYear: "2030", endMonth: "Dec",
+    locked: true,
+    monthlyActuals: {
+      "2026_0": 10817.85, "2026_1": 10817.85, "2026_2": 11194.91,
+      "2026_3": 12092.68, "2026_4": 12092.68,
+    },
+  },
+];
 
 // ─── Wish List constant (default data) ────────────────────────────────────────
 const WISH_LIST = [
@@ -3014,7 +3060,7 @@ function App() {
     projFuture.current = projFuture.current.slice(1);
     setProjOverrides(cur => { projHistory.current = [...projHistory.current.slice(-49), cur]; return next; });
   };
-  const [adjOverrides, setAdjOverrides] = useState([]);
+  const [adjOverrides, setAdjOverrides] = useState(ADJ_EBITDA_ITEMS);
   const [wishListItems, setWishListItems] = useState(WISH_LIST);
   const [approvedItemIds, setApprovedItemIds] = useState(new Set(WISH_LIST.filter(w => w.status === "plan").map(w => w.id)));
   const [rolledItems, setRolledItems] = useState([]);
