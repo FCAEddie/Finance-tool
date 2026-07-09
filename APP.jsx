@@ -1020,7 +1020,14 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
                 const rowTotal = vals ? sum(vals) : 0;
                 const isHead = isHeader(a);
                 const isTot = isTotal(a);
-                const hasChildren = !isTot && UNIFIED_PL.some(r => r.i === i + 1 && !r.a.startsWith("Total"));
+                const rowIdxInPL2 = row._idx ?? UNIFIED_PL.findIndex(r => r.a === a);
+                const hasChildren = !isTot && (() => {
+                  for (let ci = rowIdxInPL2 + 1; ci < UNIFIED_PL.length; ci++) {
+                    if (UNIFIED_PL[ci].i <= i) break;
+                    if (UNIFIED_PL[ci].i === i + 1 && !UNIFIED_PL[ci].a.startsWith("Total")) return true;
+                  }
+                  return false;
+                })();
                 const isExp = expanded.has(a);
 
                 return (
@@ -1223,11 +1230,55 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
       {modal?.type === "transactions" && (
         <Modal title={`Transactions — ${modal.row.a} — ${MONTHS[modal.month]} ${modal.year}`} onClose={() => setModal(null)}>
           {modal.txs.length === 0 ? (
-            <div style={{ color: C.textDim, fontSize: 13, padding: "16px 0", textAlign: "center" }}>
-              No transactions found for this period
-              <div style={{ color: C.actual, fontWeight: 700, fontSize: 18, marginTop: 8 }}>
-                {fmt(computeEffective(UNIFIED_PL.findIndex(r => r.a === modal.row.a), modal.year, modal.month, projOverrides, approvedItems, rolledItems))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ background: C.accentSoft, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "12px 16px" }}>
+                <div style={{ color: C.textDim, fontSize: 11, fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>GL Account Total</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ color: C.text, fontSize: 13 }}>{modal.row.a}</span>
+                  <span style={{ color: C.actual, fontWeight: 700, fontSize: 18 }}>
+                    {fmt(computeEffective(UNIFIED_PL.findIndex(r => r.a === modal.row.a), modal.year, modal.month, projOverrides, approvedItems, rolledItems))}
+                  </span>
+                </div>
               </div>
+              <div style={{ color: C.textDim, fontSize: 12, padding: "8px 12px", background: C.bg, borderRadius: 8, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <span style={{ fontSize: 14, marginTop: 1 }}>ℹ️</span>
+                <span>Line-level transaction detail was not imported for this GL account. The total above reflects the QuickBooks general ledger balance for {MONTHS[modal.month]} {modal.year}.</span>
+              </div>
+              {(() => {
+                // Show child GL accounts if any exist
+                const rowIdx = UNIFIED_PL.findIndex(r => r.a === modal.row.a);
+                const childRows = [];
+                for (let ci = rowIdx + 1; ci < UNIFIED_PL.length; ci++) {
+                  if (UNIFIED_PL[ci].i <= UNIFIED_PL[rowIdx].i) break;
+                  if (UNIFIED_PL[ci].i === UNIFIED_PL[rowIdx].i + 1) childRows.push(UNIFIED_PL[ci]);
+                }
+                if (childRows.length === 0) return null;
+                return (
+                  <div>
+                    <div style={{ color: C.textDim, fontSize: 11, fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Sub-account Breakdown</div>
+                    <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+                          <th style={{ textAlign: "left", padding: "6px 8px", color: C.textDim }}>Account</th>
+                          <th style={{ textAlign: "right", padding: "6px 8px", color: C.textDim }}>Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {childRows.map(child => {
+                          const childIdx = UNIFIED_PL.findIndex(r => r.a === child.a);
+                          const val = computeEffective(childIdx, modal.year, modal.month, projOverrides, approvedItems, rolledItems);
+                          return val ? (
+                            <tr key={child.a} style={{ borderBottom: `1px solid ${C.cardBorder}33` }}>
+                              <td style={{ padding: "6px 8px", color: C.text }}>{child.a}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right", color: C.actual, fontWeight: 600 }}>{fmt(val)}</td>
+                            </tr>
+                          ) : null;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           ) : (
             <>
@@ -3201,7 +3252,7 @@ function App() {
           <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <span style={{ color: "#fff", fontWeight: 800, fontSize: 14 }}>F</span>
           </div>
-          {sidebarOpen && <span style={{ color: C.actual, fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden" }}>FCA FP&amp;A</span>}
+          {sidebarOpen && <span style={{ color: "#fff", fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden" }}>FCA FP&A</span>}
         </div>
 
         {/* Nav items */}
