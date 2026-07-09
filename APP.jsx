@@ -2325,140 +2325,224 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
       {tab === "planning" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-          {/* ── P&L impact summary ── */}
-          <div style={card}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>P&L impact of planning items</span>
-              <span style={{ fontSize: 11, color: C.textDim }}>Base 2026 vs. base + pending items (timing-adjusted)</span>
-            </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: C.headerBg }}>
-                  <th style={{ textAlign: "left", padding: "7px 10px", borderBottom: `1px solid ${C.cardBorder}`, color: C.textDim, fontWeight: 600, fontSize: 11 }}></th>
-                  {["Base (2026)", "With pending items", "Δ Impact"].map(h => (
-                    <th key={h} style={{ textAlign: "right", padding: "7px 10px", borderBottom: `1px solid ${C.cardBorder}`, color: C.textDim, fontWeight: 600, fontSize: 11 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {plRows.map(row => {
-                  const delta = row.scen - row.base;
-                  const dColor = dc(delta, row.flip);
-                  return (
-                    <tr key={row.label} style={{ background: row.isTotal ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>
-                      <td style={{ padding: "7px 10px", color: row.isTotal ? C.accent : C.textDim, fontWeight: row.isTotal ? 700 : 400 }}>
-                        {row.label}
-                        {row.note && <span style={{ fontSize: 9, marginLeft: 5, color: C.textDim, opacity: 0.7 }}>({row.note})</span>}
-                      </td>
-                      <td style={{ padding: "7px 10px", textAlign: "right", color: row.isTotal ? C.accent : C.text, fontWeight: row.isTotal ? 700 : 400 }}>{fmtM(row.base)}</td>
-                      <td style={{ padding: "7px 10px", textAlign: "right", color: row.isTotal ? C.accent : C.text, fontWeight: row.isTotal ? 700 : 400 }}>{fmtM(row.scen)}</td>
-                      <td style={{ padding: "7px 10px", textAlign: "right", color: Math.abs(delta) < 1 ? C.textDim : dColor, fontWeight: 600 }}>
-                        {Math.abs(delta) < 1 ? "—" : (delta > 0 ? "+" : "–") + fmtM(Math.abs(delta))}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {/* ── Summary bar ── */}
+          {(() => {
+            const pending  = items.filter(w => w.status === "pending");
+            const approved = items.filter(w => w.status === "approved" || w.status === "plan");
+            const declined = items.filter(w => w.status === "rejected");
+            const deferred = items.filter(w => w.status === "deferred");
+            const pendingCost26 = pending.reduce((s,w) => s + itemYearCost(w,2026), 0);
+            const approvedCost26 = approved.reduce((s,w) => s + itemYearCost(w,2026), 0);
+            const stats = [
+              { label: "Pending review", count: pending.length,  cost: pendingCost26,  color: "#d97706", bg: "#fffbeb" },
+              { label: "Pushed to plan", count: approved.length, cost: approvedCost26, color: "#16a34a", bg: "#f0fdf4" },
+              { label: "Declined",       count: declined.length, cost: null,           color: "#dc2626", bg: "#fef2f2" },
+              { label: "Deferred",       count: deferred.length, cost: null,           color: "#6b7280", bg: "#f9fafb" },
+            ];
+            return (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+                {stats.map(s => (
+                  <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.color}33`, borderRadius: 10, padding: "12px 16px" }}>
+                    <div style={{ fontSize: 11, color: s.color, fontWeight: 600, marginBottom: 4 }}>{s.label}</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.count}</div>
+                    {s.cost != null && <div style={{ fontSize: 11, color: s.color, opacity: 0.8, marginTop: 2 }}>{fmtM(s.cost)} in 2026</div>}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
 
-          {/* ── Planning items table (full width) ── */}
-          <div style={card}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>Planning Items ({items.length})</span>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: C.textDim }}>
-                  Pending: {items.filter(w => w.status === "pending").length} items · {fmtM(pendingItems2026)} impact in 2026 · {fmtM(pendingItems2027)} in 2027
-                </span>
-                {!showAddItem && (
-                  <button onClick={() => setShowAddItem(true)} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>＋ Add item</button>
+          {/* ── Pending — awaiting decision ── */}
+          {(() => {
+            const pending = items.filter(w => w.status === "pending");
+            if (!pending.length && !showAddItem) return null;
+            return (
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>Pending — awaiting decision ({pending.length})</span>
+                  {!showAddItem && (
+                    <button onClick={() => setShowAddItem(true)} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>＋ Propose item</button>
+                  )}
+                </div>
+
+                {showAddItem && (
+                  <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 8, border: `1px solid ${C.accent}55`, background: C.accentSoft, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div style={{ flex: 2, minWidth: 180 }}>
+                      <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>ITEM NAME</div>
+                      <input value={newItemName} onChange={e => setNewItemName(e.target.value)} placeholder="e.g. Cloud infrastructure upgrade" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 110 }}>
+                      <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>ANNUAL COST</div>
+                      <input value={newItemCost} onChange={e => setNewItemCost(e.target.value)} placeholder="$" type="number" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 130 }}>
+                      <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>PRIORITY</div>
+                      <select value={newItemPriority} onChange={e => setNewItemPriority(e.target.value)} style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }}>
+                        {["Keep Lights On","Revenue Growth","Product","Retention","Security","Operations","Leadership","Innovation"].map(p => <option key={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => {
+                        if (!newItemName.trim()) return;
+                        const newItem = { id: Date.now(), name: newItemName.trim(), priority: newItemPriority, annualCost: parseFloat(newItemCost) || 0, status: "pending", requester: "", glCode: "", startMonth: "Jan", startYear: 2026 };
+                        setWishList(prev => [...(prev || WISH_LIST), newItem]);
+                        setNewItemName(""); setNewItemCost(""); setShowAddItem(false);
+                      }} style={{ padding: "6px 16px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>Submit</button>
+                      <button onClick={() => { setShowAddItem(false); setNewItemName(""); setNewItemCost(""); }} style={{ padding: "6px 12px", fontSize: 12, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, cursor: "pointer", color: C.textDim }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {pending.length > 0 && (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: C.headerBg }}>
+                          {["Priority", "Item", "Requester", "GL Account", "Annual Cost", "Start", "2026 Impact", "2027 Impact", "Decision"].map(h => (
+                            <th key={h} style={{ padding: "7px 10px", textAlign: ["Annual Cost","2026 Impact","2027 Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pending.map((item, idx) => {
+                          const pt = priorityTag(item.priority);
+                          const cost26 = itemYearCost(item, 2026);
+                          const cost27 = itemYearCost(item, 2027);
+                          const sy = parseInt(item.startYear) || 2026;
+                          const smIdx = MONTHS.indexOf(item.startMonth || "Jan");
+                          const isPartial = sy === 2026 && smIdx > 0;
+                          const setStatus = (newStatus) => setWishList(prev => (prev || WISH_LIST).map(w => w.id === item.id ? { ...w, status: newStatus } : w));
+                          return (
+                            <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: idx % 2 === 0 ? "transparent" : `${C.cardBorder}18` }}>
+                              <td style={{ padding: "7px 10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color, whiteSpace: "nowrap" }}>{item.priority}</span></td>
+                              <td style={{ padding: "7px 10px", color: C.actual, fontWeight: 500, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
+                              <td style={{ padding: "7px 10px", color: C.textDim }}>{item.requester || "—"}</td>
+                              <td style={{ padding: "7px 10px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode || "—"}</td>
+                              <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
+                              <td style={{ padding: "7px 10px", color: C.textDim, whiteSpace: "nowrap" }}>{item.startMonth || "Jan"} {item.startYear || 2026}</td>
+                              <td style={{ padding: "7px 10px", textAlign: "right", color: isPartial ? C.accent : C.text, fontWeight: isPartial ? 600 : 400 }}>
+                                {cost26 > 0 ? fmt(cost26) : "—"}{isPartial && <span style={{ fontSize: 9, color: C.textDim, marginLeft: 3 }}>({12-smIdx}mo)</span>}
+                              </td>
+                              <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{cost27 > 0 ? fmt(cost27) : "—"}</td>
+                              <td style={{ padding: "7px 10px" }}>
+                                <div style={{ display: "flex", gap: 5 }}>
+                                  <button onClick={() => setStatus("approved")} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#f0fdf4", color: "#16a34a", border: "1px solid #16a34a44", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>✓ Approve</button>
+                                  <button onClick={() => setStatus("deferred")} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#f9fafb", color: "#6b7280", border: "1px solid #6b728044", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>→ Defer</button>
+                                  <button onClick={() => setStatus("rejected")} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, background: "#fef2f2", color: "#dc2626", border: "1px solid #dc262644", borderRadius: 5, cursor: "pointer" }}>✕</button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
-            </div>
+            );
+          })()}
 
-            {showAddItem && (
-              <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 8, border: `1px solid ${C.accent}55`, background: C.accentSoft, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                <div style={{ flex: 2, minWidth: 200 }}>
-                  <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>ITEM NAME</div>
-                  <input value={newItemName} onChange={e => setNewItemName(e.target.value)} placeholder="e.g. Cloud infrastructure upgrade" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
+          {/* ── Approved — pushed to projections ── */}
+          {(() => {
+            const approved = items.filter(w => w.status === "approved" || w.status === "plan");
+            if (!approved.length) return null;
+            return (
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#16a34a" }}>✓ Pushed to projections ({approved.length})</span>
+                  <span style={{ fontSize: 11, color: C.textDim }}>{fmtM(approved.reduce((s,w) => s+itemYearCost(w,2026),0))} impact in 2026</span>
                 </div>
-                <div style={{ flex: 1, minWidth: 120 }}>
-                  <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>ANNUAL COST</div>
-                  <input value={newItemCost} onChange={e => setNewItemCost(e.target.value)} placeholder="$" type="number" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
-                </div>
-                <div style={{ flex: 1, minWidth: 140 }}>
-                  <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>PRIORITY</div>
-                  <select value={newItemPriority} onChange={e => setNewItemPriority(e.target.value)} style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }}>
-                    {["Keep Lights On","Revenue Growth","Product","Retention","Security","Operations","Leadership","Innovation"].map(p => <option key={p}>{p}</option>)}
-                  </select>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => {
-                    if (!newItemName.trim()) return;
-                    const newItem = { id: Date.now(), name: newItemName.trim(), priority: newItemPriority, annualCost: parseFloat(newItemCost) || 0, status: "pending", requester: "", glCode: "", startMonth: "Jan", startYear: 2026 };
-                    setWishList(prev => [...(prev || WISH_LIST), newItem]);
-                    setNewItemName(""); setNewItemCost(""); setShowAddItem(false);
-                  }} style={{ padding: "6px 16px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>Add</button>
-                  <button onClick={() => { setShowAddItem(false); setNewItemName(""); setNewItemCost(""); }} style={{ padding: "6px 12px", fontSize: 12, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, cursor: "pointer", color: C.textDim }}>Cancel</button>
-                </div>
-              </div>
-            )}
-
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: C.headerBg }}>
-                    {["Priority", "Item", "Requester", "GL Account", "Annual Cost", "Start", "2026 Impact", "2027 Impact", "Status"].map(h => (
-                      <th key={h} style={{ padding: "8px 10px", textAlign: ["Annual Cost","2026 Impact","2027 Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(showAllItems ? items : items.slice(0, 15)).map((item, idx) => {
-                    const pt = priorityTag(item.priority);
-                    const st = statusTag(item.status);
-                    const cost2026 = itemYearCost(item, 2026);
-                    const cost2027 = itemYearCost(item, 2027);
-                    const sy = parseInt(item.startYear) || 2026;
-                    const startMIdx = MONTHS.indexOf(item.startMonth || "Jan");
-                    const isPartial = sy === 2026 && startMIdx > 0;
-                    return (
-                      <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: idx % 2 === 0 ? "transparent" : `${C.cardBorder}18` }}>
-                        <td style={{ padding: "8px 10px" }}>
-                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color, whiteSpace: "nowrap" }}>{item.priority}</span>
-                        </td>
-                        <td style={{ padding: "8px 10px", color: C.actual, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
-                        <td style={{ padding: "8px 10px", color: C.textDim }}>{item.requester || "—"}</td>
-                        <td style={{ padding: "8px 10px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode || "—"}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "right", color: C.text }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
-                        <td style={{ padding: "8px 10px", color: C.textDim, whiteSpace: "nowrap" }}>{item.startMonth || "Jan"} {item.startYear || 2026}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "right", color: isPartial ? C.accent : C.text, fontWeight: isPartial ? 600 : 400 }}>
-                          {cost2026 > 0 ? fmt(cost2026) : "—"}
-                          {isPartial && <span style={{ fontSize: 9, color: C.textDim, marginLeft: 3 }}>({12 - startMIdx}mo)</span>}
-                        </td>
-                        <td style={{ padding: "8px 10px", textAlign: "right", color: C.text }}>{cost2027 > 0 ? fmt(cost2027) : "—"}</td>
-                        <td style={{ padding: "8px 10px" }}>
-                          <span onClick={e => { e.stopPropagation(); cycleStatus(item.id); }} title="Click to advance status"
-                            style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, fontWeight: 600, background: st.bg, color: st.color, cursor: "pointer", whiteSpace: "nowrap" }}>{st.label}</span>
-                        </td>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: C.headerBg }}>
+                        {["Priority", "Item", "GL Account", "Annual Cost", "Start", "2026 Impact", "2027 Impact", ""].map(h => (
+                          <th key={h} style={{ padding: "7px 10px", textAlign: ["Annual Cost","2026 Impact","2027 Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
+                        ))}
                       </tr>
-                    );
-                  })}
-                </tbody>
-                {items.length > 15 && (
-                  <tfoot>
-                    <tr>
-                      <td colSpan={9} style={{ padding: "8px 10px", textAlign: "center" }}>
-                        <button onClick={() => setShowAllItems(v => !v)} style={{ fontSize: 12, color: C.accent, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
-                          {showAllItems ? "Show less" : `+${items.length - 15} more items`}
-                        </button>
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
+                    </thead>
+                    <tbody>
+                      {approved.map((item, idx) => {
+                        const pt = priorityTag(item.priority);
+                        const cost26 = itemYearCost(item, 2026);
+                        const cost27 = itemYearCost(item, 2027);
+                        const sy = parseInt(item.startYear) || 2026;
+                        const smIdx = MONTHS.indexOf(item.startMonth || "Jan");
+                        const isPartial = sy === 2026 && smIdx > 0;
+                        return (
+                          <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: "#f0fdf422" }}>
+                            <td style={{ padding: "7px 10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color, whiteSpace: "nowrap" }}>{item.priority}</span></td>
+                            <td style={{ padding: "7px 10px", color: C.actual, fontWeight: 500, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
+                            <td style={{ padding: "7px 10px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode || "—"}</td>
+                            <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
+                            <td style={{ padding: "7px 10px", color: C.textDim, whiteSpace: "nowrap" }}>{item.startMonth || "Jan"} {item.startYear || 2026}</td>
+                            <td style={{ padding: "7px 10px", textAlign: "right", color: isPartial ? C.accent : C.text, fontWeight: isPartial ? 600 : 400 }}>
+                              {cost26 > 0 ? fmt(cost26) : "—"}{isPartial && <span style={{ fontSize: 9, color: C.textDim, marginLeft: 3 }}>({12-smIdx}mo)</span>}
+                            </td>
+                            <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{cost27 > 0 ? fmt(cost27) : "—"}</td>
+                            <td style={{ padding: "7px 10px" }}>
+                              <button onClick={() => setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"pending"} : w))} style={{ padding: "2px 8px", fontSize: 10, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 5, cursor: "pointer", color: C.textDim }}>↩ Reopen</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Declined & Deferred ── */}
+          {(() => {
+            const closed = items.filter(w => w.status === "rejected" || w.status === "deferred");
+            if (!closed.length) return null;
+            return (
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.textDim }}>Declined &amp; Deferred ({closed.length})</span>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: C.headerBg }}>
+                        {["Status", "Priority", "Item", "Annual Cost", ""].map(h => (
+                          <th key={h} style={{ padding: "7px 10px", textAlign: h === "Annual Cost" ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {closed.map((item, idx) => {
+                        const pt = priorityTag(item.priority);
+                        const isDeclined = item.status === "rejected";
+                        return (
+                          <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, opacity: 0.75 }}>
+                            <td style={{ padding: "7px 10px" }}>
+                              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, fontWeight: 600, background: isDeclined ? "#fef2f2" : "#f9fafb", color: isDeclined ? "#dc2626" : "#6b7280" }}>{isDeclined ? "Declined" : "Deferred"}</span>
+                            </td>
+                            <td style={{ padding: "7px 10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color }}>{item.priority}</span></td>
+                            <td style={{ padding: "7px 10px", color: C.textDim, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
+                            <td style={{ padding: "7px 10px", textAlign: "right", color: C.textDim }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
+                            <td style={{ padding: "7px 10px" }}>
+                              <button onClick={() => setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"pending"} : w))} style={{ padding: "2px 8px", fontSize: 10, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 5, cursor: "pointer", color: C.textDim }}>↩ Reopen</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Empty state */}
+          {items.every(w => !["pending"].includes(w.status)) && !showAddItem && (
+            <div style={{ textAlign: "center", padding: "32px 0", color: C.textDim, fontSize: 13 }}>
+              All items have been reviewed.
+              <button onClick={() => setShowAddItem(true)} style={{ marginLeft: 10, color: C.accent, background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>＋ Propose a new item</button>
             </div>
-          </div>
+          )}
         </div>
       )}
       {tab === "comparison" && (
@@ -2481,8 +2565,18 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
 }
 
 // ─── Page: Adj. EBITDA ────────────────────────────────────────────────────────
-const YOY_2025_ADJ_EBITDA = [328776, 379594, 291608, 288413, 574263, 355980, 249971, 507506, 351523, 406011, 27267, 290384];
-const YOY_2025_ADDBACK    = [92564, 78746, 62348, 60789, 62039, 62039, 62351, 62039, 62621, 63211, 63212, 69761];
+// YoY board deck actuals 2021-2025 (monthly)
+const YOY_REV   = { 2021:[905698,906268,1190936,1121422,1115606,1122171,1043189,1386448,1438590,1680997,985146,5693351], 2022:[1100007,1120703,1205526,1096434,1170681,1222397,1208942,1501330,1574516,1058519,870900,5881754], 2023:[1074322,1182874,1197664,1164470,1262424,1314561,1398410,1710016,1084948,1086937,1040060,7453989], 2024:[1367022,1455372,1525923,1483908,1621764,1535122,1434484,1140566,1177323,1275505,1175239,7551033], 2025:[1464222,1435212,1472996,1494890,1683713,1561691,1171002,1101328,1345739,1365911,1487298,8824729] };
+const YOY_COGS  = { 2021:[142789,147659,192662,199376,183216,172888,144678,227881,242801,294158,168591,934933], 2022:[171389,173741,204511,185786,199506,223515,188748,210044,269832,166850,108860,987994], 2023:[196047,180245,198581,184487,228634,194177,213653,266320,130522,220498,179368,1183467], 2024:[191037,257172,234061,233935,267262,248694,271804,177475,163301,185448,202700,1270250], 2025:[245534,239142,259663,262080,263831,257372,177299,186982,193064,214226,207698,1326745] };
+const YOY_GP    = { 2021:[762909,758609,998274,922046,932389,949284,898511,1158567,1195790,1386839,816555,4758418], 2022:[928619,946962,1001015,910648,971175,998882,1020194,1291286,1304684,891669,762041,4893760], 2023:[878275,1002629,999083,1120384,1033790,1120384,1184757,1443696,954425,866439,860692,6270522], 2024:[1175985,1198200,1291863,1249973,1354501,1286429,1162680,963091,1014023,1090058,972539,6280783], 2025:[1218688,1196070,1213333,1232810,1453185,1304319,993702,914346,1152674,1151685,1279600,7497984] };
+const YOY_EXP   = { 2021:[786280,737564,738660,756464,751608,719515,837215,866269,892538,1044039,1039728,3984352], 2022:[781756,808220,786297,790293,817786,803955,822296,870670,1015782,756080,799493,4107384], 2023:[842506,837418,822178,806072,799210,836484,917204,998229,728717,797845,746675,4378261], 2024:[802377,909573,872463,901042,892806,855015,975060,702185,788408,816000,928251,4842369], 2025:[982476,895222,984073,1005186,975412,1010378,686154,807063,846173,888092,1058977,5536096] };
+const YOY_DA    = { 2021:[165418,161582,157752,149853,146763,144414,81345,75117,106128,141031,101226,470526], 2022:[98699,94396,93366,92881,91184,85527,75055,103011,139104,108223,81383,388560], 2023:[78502,77287,79126,78305,75340,73982,100728,138176,114849,81383,75044,417492], 2024:[76953,80172,81583,87916,90868,96566,134813,123317,86029,74961,111897,604634], 2025:[114216,119221,119904,121502,129791,132937,132707,74706,75901,110318,147294,781905] };
+const YOY_NI    = { 2021:[-191551,-143277,99143,10948,29260,75878,-20049,193381,162123,176769,-333611,288465], 2022:[43579,39785,117855,25041,62205,109400,99043,282605,124798,18110,-118836,294812], 2023:[-59726,87924,80786,61097,124731,175409,131825,282291,101560,-12789,-196475,1296499], 2024:[260565,172365,301726,226015,335828,299847,27807,128245,139585,195915,-102609,708780], 2025:[96996,156627,84356,81122,357433,136004,165454,32577,227420,118275,48329,1138316] };
+const YOY_EBITDA= { 2021:[-23371,21045,259614,165582,180782,229768,61296,292298,303251,342800,-223173,774066], 2022:[146862,138742,214718,120355,153389,194927,197898,420616,288902,135589,-37453,786376], 2023:[35769,165211,176905,173911,234580,283900,267553,445467,225709,68594,114017,1892261], 2024:[373608,288627,419399,348931,461696,431413,187620,260906,225614,274057,44288,1438414], 2025:[236212,300848,229260,227624,512224,293941,307549,107283,306502,263593,220623,1961888] };
+const YOY_ADDBACK={ 2021:[22671,22671,22671,22671,22671,22671,43275,39806,44781,63211,22671,211951], 2022:[40589,42482,42871,42947,43062,43701,41473,54463,62621,22671,47151,158210], 2023:[27809,33549,28190,28336,40326,62949,48952,62039,22671,46516,54832,203782], 2024:[38546,46304,37144,40894,40894,41130,62351,22671,45882,42934,67053,356486], 2025:[92564,78746,62348,60789,62039,62039,62351,62039,62621,63211,63212,69761] };
+const YOY_ADJ   = { 2021:[-700,43716,282285,188253,203453,252439,104571,332104,348032,406011,-200502,986017], 2022:[187451,181224,257589,163302,196451,238628,239371,475079,351523,158260,9698,944586], 2023:[63578,198760,205095,202247,274906,346849,316505,507506,248380,115110,168849,2096043], 2024:[412154,334931,456543,389825,502590,472543,249971,283577,271496,316991,111341,1862654], 2025:[328776,379594,291608,288413,574263,355980,249971,507506,351523,406011,27267,290384] };
+const YOY_2025_ADJ_EBITDA = YOY_ADJ[2025];
+const YOY_2025_ADDBACK    = YOY_ADDBACK[2025];
 
 function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides, rolledItems }) {
   const C = useC();
@@ -2778,6 +2872,78 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
               </tr>
             </tbody>
           </table>
+        </div>
+      </Card>
+
+      {/* Year over Year — full P&L summary */}
+      <Card>
+        <div style={{ color: C.actual, fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Year over Year — Full P&L</div>
+        <div style={{ fontSize: 12, color: C.textDim, marginBottom: 14 }}>Board deck actuals 2021–2025 · 2026 live from model</div>
+        <div style={{ overflowX: "auto" }}>
+          {(() => {
+            const YRS = [2021, 2022, 2023, 2024, 2025, 2026];
+            // Compute 2026 annual totals from live model
+            const live26 = (rowDef) => Array.from({length:12}, (_,i) => computeEffective(rowDef, 2026, i, projOverrides, approvedItems, rolledItems)).reduce((s,v)=>s+v,0);
+            const live26Rev  = live26(LIVE_KPI_ROWS.rev);
+            const live26COGS = live26(LIVE_KPI_ROWS.cogs);
+            const live26GP   = live26Rev - live26COGS;
+            const live26Exp  = live26(LIVE_KPI_ROWS.exp);
+            const live26DA   = baseEbitda.reduce((s,v)=>s+v,0) - Array.from({length:12},(_,i)=>computeEffective(LIVE_KPI_ROWS.ni,2026,i,projOverrides,approvedItems,rolledItems)).reduce((s,v)=>s+v,0);
+            const live26NI   = live26(LIVE_KPI_ROWS.ni);
+            const live26EBIT = baseEbitda.reduce((s,v)=>s+v,0);
+            const live26Adj  = adjEbitda.reduce((s,v)=>s+v,0);
+            const get = (obj, yr) => yr === 2026 ? null : (obj[yr] || []).reduce((s,v)=>s+(v||0),0);
+            const rows = [
+              { label: "Revenue",        vals: { 2021:get(YOY_REV,2021), 2022:get(YOY_REV,2022), 2023:get(YOY_REV,2023), 2024:get(YOY_REV,2024), 2025:get(YOY_REV,2025), 2026:live26Rev }, isSub:false, isTotal:false },
+              { label: "COGS",           vals: { 2021:get(YOY_COGS,2021),2022:get(YOY_COGS,2022),2023:get(YOY_COGS,2023),2024:get(YOY_COGS,2024),2025:get(YOY_COGS,2025),2026:live26COGS}, isSub:true,  isTotal:false },
+              { label: "Gross Profit",   vals: { 2021:get(YOY_GP,2021),  2022:get(YOY_GP,2022),  2023:get(YOY_GP,2023),  2024:get(YOY_GP,2024),  2025:get(YOY_GP,2025),  2026:live26GP  }, isSub:false, isTotal:true  },
+              { label: "Expenses",       vals: { 2021:get(YOY_EXP,2021), 2022:get(YOY_EXP,2022), 2023:get(YOY_EXP,2023), 2024:get(YOY_EXP,2024), 2025:get(YOY_EXP,2025), 2026:live26Exp }, isSub:true,  isTotal:false },
+              { label: "D&A",            vals: { 2021:get(YOY_DA,2021),  2022:get(YOY_DA,2022),  2023:get(YOY_DA,2023),  2024:get(YOY_DA,2024),  2025:get(YOY_DA,2025),  2026:live26DA  }, isSub:true,  isTotal:false },
+              { label: "Net Income",     vals: { 2021:get(YOY_NI,2021),  2022:get(YOY_NI,2022),  2023:get(YOY_NI,2023),  2024:get(YOY_NI,2024),  2025:get(YOY_NI,2025),  2026:live26NI  }, isSub:false, isTotal:true  },
+              { label: "EBITDA",         vals: { 2021:get(YOY_EBITDA,2021),2022:get(YOY_EBITDA,2022),2023:get(YOY_EBITDA,2023),2024:get(YOY_EBITDA,2024),2025:get(YOY_EBITDA,2025),2026:live26EBIT}, isSub:false, isTotal:false },
+              { label: "Adj. EBITDA",    vals: { 2021:get(YOY_ADJ,2021), 2022:get(YOY_ADJ,2022), 2023:get(YOY_ADJ,2023), 2024:get(YOY_ADJ,2024), 2025:get(YOY_ADJ,2025), 2026:live26Adj }, isSub:false, isTotal:true  },
+            ];
+            return (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: C.headerBg }}>
+                    <th style={{ padding: "8px 12px", textAlign: "left", color: C.textDim, fontWeight: 600, borderBottom: `1px solid ${C.cardBorder}`, minWidth: 130 }}>Metric</th>
+                    {YRS.map(yr => (
+                      <th key={yr} style={{ padding: "8px 12px", textAlign: "right", color: yr === 2026 ? C.accent : C.textDim, fontWeight: 600, borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>
+                        {yr}{yr === 2026 ? " ↗" : ""}
+                      </th>
+                    ))}
+                    <th style={{ padding: "8px 12px", textAlign: "right", color: C.textDim, fontWeight: 600, borderBottom: `1px solid ${C.cardBorder}` }}>YoY △</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(row => {
+                    const v25 = row.vals[2025] || 0;
+                    const v26 = row.vals[2026] || 0;
+                    const delta = v26 - v25;
+                    const deltaPct = v25 ? (delta / Math.abs(v25)) * 100 : 0;
+                    return (
+                      <tr key={row.label} style={{ background: row.isTotal ? C.accentSoft : row.isSub ? `${C.cardBorder}18` : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>
+                        <td style={{ padding: "8px 12px", color: row.isTotal ? C.accent : row.isSub ? C.textDim : C.actual, fontWeight: row.isTotal ? 700 : 400, paddingLeft: row.isSub ? 24 : 12 }}>{row.label}</td>
+                        {YRS.map(yr => {
+                          const v = row.vals[yr];
+                          const isLive = yr === 2026;
+                          return (
+                            <td key={yr} style={{ padding: "8px 12px", textAlign: "right", color: isLive ? C.actual : C.text, fontWeight: isLive || row.isTotal ? (isLive ? 700 : 600) : 400 }}>
+                              {v != null ? fmtM(v) : "—"}
+                            </td>
+                          );
+                        })}
+                        <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 700, color: delta >= 0 ? C.positive : C.negative }}>
+                          {deltaPct >= 0 ? "+" : ""}{deltaPct.toFixed(1)}%
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            );
+          })()}
         </div>
       </Card>
     </div>
