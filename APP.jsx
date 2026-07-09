@@ -2199,30 +2199,17 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
     return ((item.annualCost || 0) * months) / 12;
   };
 
-  // Sum of approved/pending planning items for a given year (timing-adjusted)
+  // Sum of planning items for a given year (timing-adjusted)
   const planItemsExp = (year, statuses = ["approved", "plan", "pending"]) =>
     (wishList || WISH_LIST)
       .filter(w => statuses.includes(w.status))
       .reduce((s, w) => s + itemYearCost(w, year), 0);
 
-  const computeKPIs = (d, year = 2026) => {
-    const rev      = baseRev * (1 + d.revGrowth / 100);
-    const cogs     = rev * (d.cogsPercent / 100);
-    const gp       = rev - cogs;
-    const hcDelta  = Math.max(0, d.headcount - (scenarioDrivers.base?.headcount ?? d.headcount));
-    const driverExp = baseExp * (1 + d.opexGrowth / 100) + hcDelta * d.costPerFTE * 1000;
-    // Add timing-adjusted planning items (pending + approved not yet in base)
-    const pendingItemsCost = planItemsExp(year, ["pending"]);
-    const exp      = driverExp + pendingItemsCost;
-    const ni       = gp - exp;
-    const ebitda   = ni + baseDa;
-    return { rev, cogs, gp, exp, ni, ebitda, driverExp, pendingItemsCost };
-  };
-
-  const baseD   = scenarioDrivers?.base   || {};
-  const activeD = scenarioDrivers?.[activeScenario] || baseD;
-  const baseK   = computeKPIs(baseD, 2026);
-  const activeK = computeKPIs(activeD, 2026);
+  // Data-driven KPIs: base = actual data from QB, scenario adds pending items
+  const pendingItems2026 = planItemsExp(2026, ["pending"]);
+  const pendingItems2027 = planItemsExp(2027, ["pending"]);
+  const baseK   = { rev: baseRev, cogs: rawBase.cogs || 0, gp: baseGp, exp: baseExp, ni: baseNi, ebitda: baseEbitda };
+  const activeK = { ...baseK, exp: baseExp + pendingItems2026, ni: baseNi - pendingItems2026, ebitda: baseEbitda - pendingItems2026 };
 
   const fmtM = v => {
     const a = Math.abs(v);
@@ -2282,16 +2269,15 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
     { label: "Adj EBITDA",          val: activeK.ebitda, base: baseK.ebitda, flip: false },
     { label: "Net income",          val: activeK.ni,     base: baseK.ni,     flip: false },
   ];
-  const pending2026 = planItemsExp(2026, ["pending"]);
   const plRows = [
-    { label: "Total revenue",         base: baseK.rev,    scen: activeK.rev,    flip: false, isTotal: false },
-    { label: "Total COGS",            base: baseK.cogs,   scen: activeK.cogs,   flip: true,  isTotal: false },
-    { label: "Gross profit",          base: baseK.gp,     scen: activeK.gp,     flip: false, isTotal: true  },
-    { label: "Core opex",             base: baseK.driverExp, scen: activeK.driverExp, flip: true, isTotal: false },
-    { label: "Planning items (2026)", base: pending2026,  scen: pending2026,    flip: true,  isTotal: false, note: "timing-adjusted" },
-    { label: "Total opex",            base: baseK.exp,    scen: activeK.exp,    flip: true,  isTotal: false },
-    { label: "Net income",            base: baseK.ni,     scen: activeK.ni,     flip: false, isTotal: true  },
-    { label: "Adj EBITDA",           base: baseK.ebitda, scen: activeK.ebitda, flip: false, isTotal: true  },
+    { label: "Revenue",          base: baseK.rev,    scen: activeK.rev,    flip: false, isTotal: false },
+    { label: "COGS",             base: baseK.cogs,   scen: activeK.cogs,   flip: true,  isTotal: false },
+    { label: "Gross Profit",     base: baseK.gp,     scen: activeK.gp,     flip: false, isTotal: true  },
+    { label: "Base Opex",        base: baseK.exp,    scen: baseK.exp,      flip: true,  isTotal: false },
+    { label: "Pending Items",    base: 0,            scen: pendingItems2026,flip: true, isTotal: false, note: "timing-adj" },
+    { label: "Total Opex",       base: baseK.exp,    scen: activeK.exp,    flip: true,  isTotal: false },
+    { label: "Net Income",       base: baseK.ni,     scen: activeK.ni,     flip: false, isTotal: true  },
+    { label: "Adj. EBITDA",      base: baseK.ebitda, scen: activeK.ebitda, flip: false, isTotal: true  },
   ];
   const DRIVER_FIELDS = [
     { key: "revGrowth",   label: "Revenue growth", unit: "%",    step: 0.1 },
@@ -2337,234 +2323,144 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
       </div>
 
       {tab === "planning" && (
-        <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14, alignItems: "start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-          {/* ── Left panel ── */}
-          <div>
-            <div style={card}>
-              <div style={secLabel}>Scenario versions</div>
-              {SCENARIO_DEFS.map(sc => {
-                const active = sc.id === activeScenario;
-                const sStatus = scenarioStatus?.[sc.id] || "draft";
-                const sMeta = STATUS_META[sStatus] || STATUS_META.draft;
-                return (
-                  <div key={sc.id} onClick={() => setActiveScenario(sc.id)} style={{
-                    display: "flex", alignItems: "center", gap: 8, padding: "8px 10px",
-                    borderRadius: 8, cursor: "pointer", marginBottom: 4,
-                    background: active ? C.accentSoft : "transparent",
-                    border: `1px solid ${active ? C.accent + "55" : "transparent"}`,
-                  }}>
-                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: sc.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 13, flex: 1, fontWeight: active ? 600 : 400, color: active ? C.accent : C.text }}>{sc.name}</span>
-                    <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 600, background: sMeta.bg, color: sMeta.color }}>{sMeta.label}</span>
-                  </div>
-                );
-              })}
-              {!showNewVersion ? (
-                <button onClick={() => setShowNewVersion(true)} style={{
-                  display: "flex", alignItems: "center", gap: 6, width: "100%", marginTop: 8,
-                  padding: "7px 10px", fontSize: 12, color: C.textDim, cursor: "pointer",
-                  borderRadius: 8, border: `1px dashed ${C.cardBorder}`, background: "none",
-                }}>＋ New version</button>
-              ) : (
-                <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 8, border: `1px solid ${C.accent}55`, background: C.accentSoft, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ fontSize: 11, color: C.textDim, fontWeight: 600 }}>New scenario version</div>
-                  <input value={newVersionName} onChange={e => setNewVersionName(e.target.value)} placeholder="e.g. Conservative 2027" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => {
-                      if (!newVersionName.trim()) return;
-                      const newId = newVersionName.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
-                      setScenarioDrivers(prev => ({ ...prev, [newId]: { ...(scenarioDrivers.base || {}), revGrowth: 5.0 } }));
-                      setScenarioStatus(prev => ({ ...prev, [newId]: "draft" }));
-                      setActiveScenario(newId);
-                      setShowNewVersion(false); setNewVersionName("");
-                    }} style={{ flex: 1, padding: "6px 12px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>Create</button>
-                    <button onClick={() => { setShowNewVersion(false); setNewVersionName(""); }} style={{ flex: 1, padding: "6px 12px", fontSize: 12, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, cursor: "pointer", color: C.textDim }}>Cancel</button>
-                  </div>
-                </div>
-              )}
+          {/* ── P&L impact summary ── */}
+          <div style={card}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>P&L impact of planning items</span>
+              <span style={{ fontSize: 11, color: C.textDim }}>Base 2026 vs. base + pending items (timing-adjusted)</span>
             </div>
-
-            {/* Planning items */}
-            <div style={card}>
-              <div style={secLabel}>Planning items</div>
-              {(showAllItems ? items : items.slice(0, 10)).map(item => {
-                const pt = priorityTag(item.priority);
-                const st = statusTag(item.status);
-                return (
-                  <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 0", borderBottom: `1px solid ${C.cardBorder}` }}>
-                    <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color, flexShrink: 0, whiteSpace: "nowrap" }} title={item.priority}>{item.priority.split(" ")[0]}</span>
-                    <span style={{ flex: 1, fontSize: 11, color: C.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }} title={item.name}>{item.name}</span>
-                    {(() => {
-                      const cost2026 = itemYearCost(item, 2026);
-                      const cost2027 = itemYearCost(item, 2027);
-                      const sy = parseInt(item.startYear) || 2026;
-                      const sm = item.startMonth || "Jan";
-                      const mIdx = MONTHS.indexOf(sm);
-                      const isPartialYear = sy === 2026 && mIdx > 0;
-                      return (
-                        <span style={{ fontSize: 10, color: C.textDim, flexShrink: 0, textAlign: "right" }}
-                          title={isPartialYear ? `${sm} '${String(sy).slice(2)}: ${fmt(cost2026)} (${12-mIdx}mo) | FY2027: ${fmt(cost2027)}` : fmt(item.annualCost)}>
-                          {item.annualCost > 0
-                            ? isPartialYear
-                              ? <span>{fmt(cost2026)} <span style={{ color: C.accent, fontSize: 9 }}>↗{fmt(cost2027)}/yr</span></span>
-                              : fmt(item.annualCost)
-                            : "TBD"}
-                        </span>
-                      );
-                    })()}
-                    <span onClick={e => { e.stopPropagation(); cycleStatus(item.id); }} title="Click to advance status" style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 600, background: st.bg, color: st.color, cursor: "pointer", flexShrink: 0 }}>{st.label}</span>
-                  </div>
-                );
-              })}
-              {items.length > 10 && !showAllItems && (
-                <button onClick={() => setShowAllItems(true)} style={{ fontSize: 11, color: C.accent, marginTop: 8, textAlign: "center", width: "100%", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
-                  +{items.length - 10} more items — click to expand
-                </button>
-              )}
-              {showAllItems && items.length > 10 && (
-                <button onClick={() => setShowAllItems(false)} style={{ fontSize: 11, color: C.textDim, marginTop: 8, textAlign: "center", width: "100%", background: "none", border: "none", cursor: "pointer" }}>
-                  Show less
-                </button>
-              )}
-              {!showAddItem ? (
-                <button onClick={() => setShowAddItem(true)} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", marginTop: 8, padding: "7px 10px", fontSize: 12, color: C.textDim, cursor: "pointer", borderRadius: 8, border: `1px dashed ${C.cardBorder}`, background: "none" }}>＋ Add item</button>
-              ) : (
-                <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 8, border: `1px solid ${C.accent}55`, background: C.accentSoft, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <input value={newItemName} onChange={e => setNewItemName(e.target.value)} placeholder="Item name" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input value={newItemCost} onChange={e => setNewItemCost(e.target.value)} placeholder="Annual cost $" type="number" style={{ flex: 1, padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual }} />
-                    <select value={newItemPriority} onChange={e => setNewItemPriority(e.target.value)} style={{ flex: 1, padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual }}>
-                      {["Keep Lights On","Revenue Growth","Product","Retention","Security","Operations","Leadership","Innovation"].map(p => <option key={p}>{p}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => {
-                      if (!newItemName.trim()) return;
-                      const newItem = { id: Date.now(), name: newItemName.trim(), priority: newItemPriority, annualCost: parseFloat(newItemCost) || 0, status: "pending", requester: "", glCode: "", startMonth: "Jan", startYear: 2026 };
-                      setWishList(prev => [...(prev || WISH_LIST), newItem]);
-                      setNewItemName(""); setNewItemCost(""); setShowAddItem(false);
-                    }} style={{ flex: 1, padding: "6px 12px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>Add</button>
-                    <button onClick={() => { setShowAddItem(false); setNewItemName(""); setNewItemCost(""); }} style={{ flex: 1, padding: "6px 12px", fontSize: 12, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, cursor: "pointer", color: C.textDim }}>Cancel</button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: C.headerBg }}>
+                  <th style={{ textAlign: "left", padding: "7px 10px", borderBottom: `1px solid ${C.cardBorder}`, color: C.textDim, fontWeight: 600, fontSize: 11 }}></th>
+                  {["Base (2026)", "With pending items", "Δ Impact"].map(h => (
+                    <th key={h} style={{ textAlign: "right", padding: "7px 10px", borderBottom: `1px solid ${C.cardBorder}`, color: C.textDim, fontWeight: 600, fontSize: 11 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {plRows.map(row => {
+                  const delta = row.scen - row.base;
+                  const dColor = dc(delta, row.flip);
+                  return (
+                    <tr key={row.label} style={{ background: row.isTotal ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>
+                      <td style={{ padding: "7px 10px", color: row.isTotal ? C.accent : C.textDim, fontWeight: row.isTotal ? 700 : 400 }}>
+                        {row.label}
+                        {row.note && <span style={{ fontSize: 9, marginLeft: 5, color: C.textDim, opacity: 0.7 }}>({row.note})</span>}
+                      </td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: row.isTotal ? C.accent : C.text, fontWeight: row.isTotal ? 700 : 400 }}>{fmtM(row.base)}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: row.isTotal ? C.accent : C.text, fontWeight: row.isTotal ? 700 : 400 }}>{fmtM(row.scen)}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: Math.abs(delta) < 1 ? C.textDim : dColor, fontWeight: 600 }}>
+                        {Math.abs(delta) < 1 ? "—" : (delta > 0 ? "+" : "–") + fmtM(Math.abs(delta))}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
 
-          {/* ── Right panel ── */}
-          <div>
-            {/* Workflow action bar */}
-            {!isBase && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.accentSoft, border: `1px solid ${C.accent}33`, borderRadius: 10, padding: "10px 16px", marginBottom: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {["draft", "submitted", "approved", "locked"].map((st, si) => {
-                    const isPast    = ["draft","submitted","approved","locked"].indexOf(curStatus) > si;
-                    const isCurrent = curStatus === st;
-                    return (
-                      <React.Fragment key={st}>
-                        {si > 0 && <span style={{ color: C.textDim, fontSize: 12 }}>→</span>}
-                        <span style={{
-                          fontSize: 11, fontWeight: isCurrent ? 700 : 400,
-                          color: isCurrent ? C.accent : isPast ? C.positive : C.textDim,
-                          textTransform: "capitalize",
-                        }}>{st === "locked" ? "Live" : st}</span>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-                {!isLocked && sm.nextLabel && (
-                  <button
-                    onClick={() => curStatus === "approved" ? publishScenario(activeScenario) : advanceScenarioStatus(activeScenario)}
-                    style={{
-                      padding: "6px 14px", fontSize: 12, fontWeight: 600, borderRadius: 8, cursor: "pointer", border: "none",
-                      background: curStatus === "approved" ? C.positive : C.accent,
-                      color: "#fff",
-                    }}>{sm.nextLabel}</button>
+          {/* ── Planning items table (full width) ── */}
+          <div style={card}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>Planning Items ({items.length})</span>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: C.textDim }}>
+                  Pending: {items.filter(w => w.status === "pending").length} items · {fmtM(pendingItems2026)} impact in 2026 · {fmtM(pendingItems2027)} in 2027
+                </span>
+                {!showAddItem && (
+                  <button onClick={() => setShowAddItem(true)} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>＋ Add item</button>
                 )}
-                {isLocked && <span style={{ fontSize: 12, fontWeight: 600, color: C.positive }}>✓ Published to projections</span>}
+              </div>
+            </div>
+
+            {showAddItem && (
+              <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 8, border: `1px solid ${C.accent}55`, background: C.accentSoft, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div style={{ flex: 2, minWidth: 200 }}>
+                  <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>ITEM NAME</div>
+                  <input value={newItemName} onChange={e => setNewItemName(e.target.value)} placeholder="e.g. Cloud infrastructure upgrade" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>ANNUAL COST</div>
+                  <input value={newItemCost} onChange={e => setNewItemCost(e.target.value)} placeholder="$" type="number" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>PRIORITY</div>
+                  <select value={newItemPriority} onChange={e => setNewItemPriority(e.target.value)} style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }}>
+                    {["Keep Lights On","Revenue Growth","Product","Retention","Security","Operations","Leadership","Innovation"].map(p => <option key={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => {
+                    if (!newItemName.trim()) return;
+                    const newItem = { id: Date.now(), name: newItemName.trim(), priority: newItemPriority, annualCost: parseFloat(newItemCost) || 0, status: "pending", requester: "", glCode: "", startMonth: "Jan", startYear: 2026 };
+                    setWishList(prev => [...(prev || WISH_LIST), newItem]);
+                    setNewItemName(""); setNewItemCost(""); setShowAddItem(false);
+                  }} style={{ padding: "6px 16px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>Add</button>
+                  <button onClick={() => { setShowAddItem(false); setNewItemName(""); setNewItemCost(""); }} style={{ padding: "6px 12px", fontSize: 12, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, cursor: "pointer", color: C.textDim }}>Cancel</button>
+                </div>
               </div>
             )}
 
-            {/* Driver inputs */}
-            <div style={card}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>Assumption drivers — {activeScenDef.name}</span>
-                <span style={{ fontSize: 11, color: C.textDim }}>
-                  {inputsLocked && !isLocked ? "🔒 Locked — advance status to edit" : isLocked ? "Published — read only" : "Changes cascade to P&L automatically"}
-                </span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {DRIVER_FIELDS.map(({ key, label, unit, step }) => {
-                  const val  = activeD[key] ?? 0;
-                  const bVal = baseD[key]   ?? 0;
-                  const diff = val - bVal;
-                  const locked = isBase || inputsLocked;
-                  return (
-                    <div key={key} style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.cardBorder}`, opacity: locked ? 0.7 : 1 }}>
-                      <div style={{ fontSize: 11, color: C.textDim, marginBottom: 6 }}>{label}</div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <input type="number" value={step < 1 ? val : Math.round(val)} step={step} disabled={locked}
-                          onChange={e => updateDriver(key, e.target.value)}
-                          style={{ width: 72, padding: "4px 8px", fontSize: 13, textAlign: "right", border: `1px solid ${C.cardBorder}`, borderRadius: 6, background: locked ? C.bg : C.card, color: C.actual, fontFamily: "inherit" }}
-                        />
-                        <span style={{ fontSize: 11, color: C.textDim }}>{unit}</span>
-                        {!isBase && Math.abs(diff) > 0.001 && (
-                          <span style={{ fontSize: 10, fontWeight: 600, color: diff > 0 ? C.negative : C.positive }}>
-                            {diff > 0 ? "+" : ""}{step < 1 ? diff.toFixed(1) : Math.round(diff)} vs base
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* P&L comparison */}
-            <div style={card}>
-              <div style={{ marginBottom: 12 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>P&amp;L impact — Base vs. {activeScenDef.name}</span>
-              </div>
+            <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
-                  <tr>
-                    <th style={{ textAlign: "left", padding: "5px 8px", borderBottom: `1px solid ${C.cardBorder}`, color: C.textDim, fontWeight: 500, fontSize: 11, width: "38%" }}></th>
-                    {["Base", activeScenDef.name, "Δ"].map(h => (
-                      <th key={h} style={{ textAlign: "right", padding: "5px 8px", borderBottom: `1px solid ${C.cardBorder}`, color: C.textDim, fontWeight: 500, fontSize: 11 }}>{h}</th>
+                  <tr style={{ background: C.headerBg }}>
+                    {["Priority", "Item", "Requester", "GL Account", "Annual Cost", "Start", "2026 Impact", "2027 Impact", "Status"].map(h => (
+                      <th key={h} style={{ padding: "8px 10px", textAlign: ["Annual Cost","2026 Impact","2027 Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {plRows.map(row => {
-                    const delta = row.scen - row.base;
-                    const dColor = dc(delta, row.flip);
+                  {(showAllItems ? items : items.slice(0, 15)).map((item, idx) => {
+                    const pt = priorityTag(item.priority);
+                    const st = statusTag(item.status);
+                    const cost2026 = itemYearCost(item, 2026);
+                    const cost2027 = itemYearCost(item, 2027);
+                    const sy = parseInt(item.startYear) || 2026;
+                    const startMIdx = MONTHS.indexOf(item.startMonth || "Jan");
+                    const isPartial = sy === 2026 && startMIdx > 0;
                     return (
-                      <tr key={row.label} style={{ background: row.isTotal ? C.accentSoft : "transparent" }}>
-                        <td style={{ padding: "6px 8px", borderBottom: `1px solid ${C.cardBorder}`, color: row.isTotal ? C.accent : C.textDim, fontWeight: row.isTotal ? 600 : 400 }}>
-                          {row.label}
-                          {row.note && <span style={{ fontSize: 9, marginLeft: 4, color: C.textDim, opacity: 0.7 }}>({row.note})</span>}
+                      <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: idx % 2 === 0 ? "transparent" : `${C.cardBorder}18` }}>
+                        <td style={{ padding: "8px 10px" }}>
+                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color, whiteSpace: "nowrap" }}>{item.priority}</span>
                         </td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.cardBorder}`, color: row.isTotal ? C.accent : C.text }}>{fmtM(row.base)}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.cardBorder}`, color: row.isTotal ? C.accent : C.text }}>{fmtM(row.scen)}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", borderBottom: `1px solid ${C.cardBorder}`, color: dColor, fontWeight: 600 }}>
-                          {delta > 0 ? "+" : delta < 0 ? "–" : ""}{fmtM(Math.abs(delta))}
+                        <td style={{ padding: "8px 10px", color: C.actual, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
+                        <td style={{ padding: "8px 10px", color: C.textDim }}>{item.requester || "—"}</td>
+                        <td style={{ padding: "8px 10px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode || "—"}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right", color: C.text }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
+                        <td style={{ padding: "8px 10px", color: C.textDim, whiteSpace: "nowrap" }}>{item.startMonth || "Jan"} {item.startYear || 2026}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right", color: isPartial ? C.accent : C.text, fontWeight: isPartial ? 600 : 400 }}>
+                          {cost2026 > 0 ? fmt(cost2026) : "—"}
+                          {isPartial && <span style={{ fontSize: 9, color: C.textDim, marginLeft: 3 }}>({12 - startMIdx}mo)</span>}
+                        </td>
+                        <td style={{ padding: "8px 10px", textAlign: "right", color: C.text }}>{cost2027 > 0 ? fmt(cost2027) : "—"}</td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <span onClick={e => { e.stopPropagation(); cycleStatus(item.id); }} title="Click to advance status"
+                            style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, fontWeight: 600, background: st.bg, color: st.color, cursor: "pointer", whiteSpace: "nowrap" }}>{st.label}</span>
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
+                {items.length > 15 && (
+                  <tfoot>
+                    <tr>
+                      <td colSpan={9} style={{ padding: "8px 10px", textAlign: "center" }}>
+                        <button onClick={() => setShowAllItems(v => !v)} style={{ fontSize: 12, color: C.accent, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                          {showAllItems ? "Show less" : `+${items.length - 15} more items`}
+                        </button>
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
-              {isLocked && (
-                <div style={{ marginTop: 12, padding: "8px 12px", background: C.positiveSoft || "#f0fdf4", borderRadius: 8, fontSize: 12, color: C.positive }}>
-                  ✓ These figures are now live in Projections and Full P&L.
-                </div>
-              )}
             </div>
           </div>
         </div>
       )}
-
       {tab === "comparison" && (
         <div style={{ ...card, textAlign: "center", padding: "48px 0" }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
