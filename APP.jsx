@@ -600,7 +600,20 @@ function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
 }
 
 // ─── Page: Dashboard ──────────────────────────────────────────────────────────
-function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
+// Module-scope helper — mirrors AdjEbitda getMonthlyAdj for use in Dashboard/etc.
+const calcAdjMonthly = (item, yr, m) => {
+  const sy = parseInt(item.startYear) || 2026;
+  const sm = MONTHS.indexOf(item.startMonth || "Jan");
+  const ey = parseInt(item.endYear) || 2030;
+  const em = MONTHS.indexOf(item.endMonth || "Dec");
+  const inRange = (yr > sy || (yr === sy && m >= sm)) && (yr < ey || (yr === ey && m <= em));
+  if (!inRange) return 0;
+  const actualKey = yr + "_" + m;
+  if (item.monthlyActuals?.[actualKey] !== undefined) return item.monthlyActuals[actualKey];
+  return (item.annualCost || 0) / 12;
+};
+
+function Dashboard({ onNav, projOverrides, approvedItems, rolledItems, adjOverrides }) {
   const C = useC();
 
   const liveMonthly = React.useMemo(() =>
@@ -658,11 +671,13 @@ function Dashboard({ onNav, projOverrides, approvedItems, rolledItems }) {
   const ytdPlanTax = Math.max(0, (ytdPlanEbitda - ytdPlanDA) - ytdPlanNI);
   const fyTax      = Math.max(0, (fyEbitda - fyDA) - fyNI);
   const fyPlanTax  = Math.max(0, (fyPlanEbitda - fyPlanDA) - fyPlanNI);
-  // Adj EBITDA addbacks from approved/rolled scenarios
-  const ytdAddback = (approvedItems || []).concat(rolledItems || [])
-    .reduce((s, it) => s + ((it.annualCost || 0) / 12) * (ACTUALS_THRU + 1), 0);
-  const fyAddback  = (approvedItems || []).concat(rolledItems || [])
-    .reduce((s, it) => s + (it.annualCost || 0), 0);
+  // Adj EBITDA addbacks — sourced from adjOverrides (MCSCM items with actual monthly values)
+  const ytdAddback = (adjOverrides || []).reduce((s, item) =>
+    s + Array.from({ length: ACTUALS_THRU + 1 }, (_, m) => calcAdjMonthly(item, 2026, m))
+         .reduce((a, v) => a + v, 0), 0);
+  const fyAddback  = (adjOverrides || []).reduce((s, item) =>
+    s + Array.from({ length: 12 }, (_, m) => calcAdjMonthly(item, 2026, m))
+         .reduce((a, v) => a + v, 0), 0);
   const ytdAdjEbitda = ytdEbitda + ytdAddback;
   const fyAdjEbitda  = fyEbitda  + fyAddback;
   const ytdPlanAdjEbitda = ytdPlanEbitda;
@@ -2413,6 +2428,9 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
 }
 
 // ─── Page: Adj. EBITDA ────────────────────────────────────────────────────────
+const YOY_2025_ADJ_EBITDA = [328776, 379594, 291608, 288413, 574263, 355980, 249971, 507506, 351523, 406011, 27267, 290384];
+const YOY_2025_ADDBACK    = [92564, 78746, 62348, 60789, 62039, 62039, 62351, 62039, 62621, 63211, 63212, 69761];
+
 function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides, rolledItems }) {
   const C = useC();
   const [year, setYear] = useState(2026);
@@ -2475,6 +2493,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
   const totalBase = baseEbitda.reduce((s, v) => s + v, 0);
   const totalAdj = adjEbitda.reduce((s, v) => s + v, 0);
   const totalAdjItems = monthlyAdj.reduce((s, v) => s + v, 0);
+  const ytdAdjItems = year === 2026 ? monthlyAdj.slice(0, ACTUALS_THRU + 1).reduce((s, v) => s + v, 0) : null;
   const planEbitda = year === 2026 ? PLAN_2026.rev.map((r, i) => r - PLAN_2026.cogs[i] - PLAN_2026.exp[i] + PLAN_2026.da[i]) : null;
 
   const chartData = MONTHS.map((m, i) => ({
@@ -2504,7 +2523,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         {[
           { label: "Base EBITDA", value: totalBase, sub: `FY ${year}` },
-          { label: "Total Addbacks", value: totalAdjItems, sub: `${adjItems.length} item${adjItems.length !== 1 ? "s" : ""}`, pos: true },
+          { label: "Total Addbacks", value: totalAdjItems, sub: ytdAdjItems != null ? `YTD: ${fmt(ytdAdjItems)}` : `${adjItems.length} item${adjItems.length !== 1 ? "s" : ""}`, pos: true },
           { label: "Adj. EBITDA", value: totalAdj, sub: "After adjustments", highlight: true },
         ].map((k, i) => (
           <Card key={i} style={{ padding: 16, textAlign: "center" }}>
@@ -2623,7 +2642,7 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: C.headerBg }}>
-                {["Month", "Base EBITDA", "Adj Items", "Adj. EBITDA", year === 2026 ? "Plan" : null, "Margin"].filter(Boolean).map(h => (
+                {["Month", "Base EBITDA", "Adj Items", "Adj. EBITDA", year === 2026 ? "Plan" : null, "Margin", "PY Adj EBITDA", "YoY △"].filter(Boolean).map(h => (
                   <th key={h} style={{ padding: "8px 12px", color: C.textDim, fontWeight: 600, textAlign: h === "Month" ? "left" : "right", borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
                 ))}
               </tr>
@@ -2637,14 +2656,46 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
                   <tr key={m} style={{ background: i % 2 === 0 ? "transparent" : `${C.cardBorder}22`, borderBottom: `1px solid ${C.cardBorder}33` }}>
                     <td style={{ padding: "8px 12px", color: C.actual, fontWeight: isActual ? 600 : 400 }}>{m}{isActual ? " 🔒" : ""}</td>
                     <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{fmt(baseEbitda[i])}</td>
-                    <td style={{ padding: "8px 12px", textAlign: "right", color: monthlyAdj[i] > 0 ? C.positive : C.textDim }}>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: monthlyAdj[i] > 0 ? C.positive : C.textDim, position: "relative", cursor: monthlyAdj[i] > 0 ? "default" : undefined }}
+                      onMouseEnter={e => { if (monthlyAdj[i] > 0) { const el = e.currentTarget.querySelector(".adj-tip"); if (el) el.style.display = "block"; } }}
+                      onMouseLeave={e => { const el = e.currentTarget.querySelector(".adj-tip"); if (el) el.style.display = "none"; }}>
                       {monthlyAdj[i] > 0 ? `+${fmt(monthlyAdj[i])}` : "—"}
+                      {monthlyAdj[i] > 0 && (
+                        <div className="adj-tip" style={{ display: "none", position: "absolute", right: 0, top: "100%", zIndex: 99, background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 14px", minWidth: 220, boxShadow: "0 4px 16px rgba(0,0,0,0.18)", textAlign: "left", fontSize: 12, lineHeight: 1.7 }}>
+                          {adjItems.map(item => {
+                            const v = getMonthlyAdj(item, year, i);
+                            if (!v) return null;
+                            return (
+                              <div key={item.id} style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+                                <span style={{ color: C.textDim }}>{item.label.replace(" (MCSCM)", "")}</span>
+                                <span style={{ color: C.positive, fontWeight: 600 }}>+{fmt(v)}</span>
+                              </div>
+                            );
+                          })}
+                          <div style={{ borderTop: `1px solid ${C.cardBorder}`, marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", gap: 16, fontWeight: 700 }}>
+                            <span style={{ color: C.actual }}>Total</span>
+                            <span style={{ color: C.positive }}>+{fmt(monthlyAdj[i])}</span>
+                          </div>
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: "8px 12px", textAlign: "right", color: adjEbitda[i] >= 0 ? C.actual : C.negative, fontWeight: 600 }}>{fmt(adjEbitda[i])}</td>
                     {year === 2026 && <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{planEbitda ? fmt(planEbitda[i]) : "—"}</td>}
                     <td style={{ padding: "8px 12px", textAlign: "right", color: margin >= 0.15 ? C.positive : margin >= 0 ? C.actual : C.negative }}>
                       {(margin * 100).toFixed(1)}%
                     </td>
+                    {year === 2026 && (() => {
+                      const py = YOY_2025_ADJ_EBITDA[i];
+                      const delta = adjEbitda[i] - py;
+                      return (
+                        <>
+                          <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim }}>{fmt(py)}</td>
+                          <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: delta >= 0 ? C.positive : C.negative }}>
+                            {delta >= 0 ? "+" : ""}{fmt(delta)}
+                          </td>
+                        </>
+                      );
+                    })()}
                   </tr>
                 );
               })}
@@ -2659,6 +2710,18 @@ function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides
                 <td style={{ padding: "8px 12px", textAlign: "right" }}>
                   {(() => { const rev = Array.from({length:12},(_,i)=>computeEffective(LIVE_KPI_ROWS.rev,year,i,projOverrides,approvedItems,rolledItems)).reduce((s,v)=>s+v,0); const m = rev ? totalAdj/rev : 0; return <span style={{ color: m>=0.15?C.positive:m>=0?C.actual:C.negative }}>{(m*100).toFixed(1)}%</span>; })()}
                 </td>
+                {year === 2026 && (() => {
+                  const pyTotal = YOY_2025_ADJ_EBITDA.reduce((s,v) => s+v, 0);
+                  const delta = totalAdj - pyTotal;
+                  return (
+                    <>
+                      <td style={{ padding: "8px 12px", textAlign: "right", color: C.textDim, fontWeight: 700 }}>{fmt(pyTotal)}</td>
+                      <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 700, color: delta >= 0 ? C.positive : C.negative }}>
+                        {delta >= 0 ? "+" : ""}{fmt(delta)}
+                      </td>
+                    </>
+                  );
+                })()}
               </tr>
             </tbody>
           </table>
@@ -3193,7 +3256,7 @@ function App() {
 
       {/* Main content */}
       <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column" }}>
-        {page === "dashboard"    && <Dashboard onNav={handleNav} projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
+        {page === "dashboard"    && <Dashboard onNav={handleNav} projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} adjOverrides={adjOverrides} />}
         {page === "rev-vs-plan"  && <RevVsPlan projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-summary"  && <AvBSummary projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
         {page === "avb-detail"   && <AvBDetail projOverrides={projOverrides} approvedItems={approvedItems} rolledItems={rolledItems} />}
