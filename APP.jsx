@@ -2154,6 +2154,8 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
   const [newItemPriority, setNewItemPriority] = React.useState("Operations");
   const [showNewVersion, setShowNewVersion] = React.useState(false);
   const [newVersionName, setNewVersionName] = React.useState("");
+  const [showPushed, setShowPushed] = React.useState(false);
+  const [deferTarget, setDeferTarget] = React.useState(null); // { id, month, year }
 
   const SCENARIO_DEFS = [
     { id: "base",       name: "Base",          color: "#3B6D11" },
@@ -2293,16 +2295,14 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Scenarios</h2>
-        <div style={{ display: "flex", border: `1px solid ${C.cardBorder}`, borderRadius: 8, overflow: "hidden" }}>
-          {["planning", "comparison", "waterfall"].map(t => (
-            <button key={t} onClick={() => setTab(t)} style={{
-              padding: "6px 14px", fontSize: 12, fontWeight: tab === t ? 600 : 400,
-              background: tab === t ? C.accentSoft : C.card, color: tab === t ? C.accent : C.textDim,
-              border: "none", borderRight: `1px solid ${C.cardBorder}`, cursor: "pointer",
-            }}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
-          ))}
-        </div>
+        <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Planning Tracker</h2>
+        <button onClick={() => setShowPushed(v => !v)} style={{
+          display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", fontSize: 12, fontWeight: 500,
+          background: showPushed ? C.accentSoft : C.card, color: showPushed ? C.accent : C.textDim,
+          border: `1px solid ${showPushed ? C.accent + "55" : C.cardBorder}`, borderRadius: 8, cursor: "pointer",
+        }}>
+          ✓ Passed ({items.filter(w => w.status === "approved" || w.status === "plan").length})
+        </button>
       </div>
 
       {/* KPI strip */}
@@ -2325,29 +2325,53 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
       {tab === "planning" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-          {/* ── Summary bar ── */}
+          {/* ── P&L Snapshot ── */}
           {(() => {
-            const pending  = items.filter(w => w.status === "pending");
-            const approved = items.filter(w => w.status === "approved" || w.status === "plan");
-            const declined = items.filter(w => w.status === "rejected");
-            const deferred = items.filter(w => w.status === "deferred");
-            const pendingCost26 = pending.reduce((s,w) => s + itemYearCost(w,2026), 0);
-            const approvedCost26 = approved.reduce((s,w) => s + itemYearCost(w,2026), 0);
-            const stats = [
-              { label: "Pending review", count: pending.length,  cost: pendingCost26,  color: "#d97706", bg: "#fffbeb" },
-              { label: "Pushed to plan", count: approved.length, cost: approvedCost26, color: "#16a34a", bg: "#f0fdf4" },
-              { label: "Declined",       count: declined.length, cost: null,           color: "#dc2626", bg: "#fef2f2" },
-              { label: "Deferred",       count: deferred.length, cost: null,           color: "#6b7280", bg: "#f9fafb" },
+            const k26    = KPIS_ALL["2026"] || {};
+            const s12    = arr => (arr||[]).reduce((a,v)=>a+(v||0),0);
+            const sYTD   = arr => (arr||[]).slice(0, ACTUALS_THRU+1).reduce((a,v)=>a+(v||0),0);
+            // Plan column (full year 2026 plan)
+            const pl = { rev: s12(PLAN_2026.rev), cogs: s12(PLAN_2026.cogs), gp: s12(PLAN_2026.gp), exp: s12(PLAN_2026.exp), ni: s12(PLAN_2026.ni), ebitda: s12(PLAN_2026.ni) + s12(PLAN_2026.da) };
+            // Actuals column (YTD Jan–May)
+            const ac = { rev: sYTD(k26.rev), cogs: sYTD(k26.cogs), gp: sYTD(k26.gp), exp: sYTD(k26.exp), ni: sYTD(k26.ni), ebitda: sYTD(k26.ebitda) };
+            // Projections + Approved (full year blend: actuals + proj + approved items)
+            const approvedCost = planItemsExp(2026, ["approved","plan"]);
+            const pr = { rev: baseRev, cogs: rawBase.cogs||0, gp: baseGp, exp: baseExp + approvedCost, ni: baseNi - approvedCost, ebitda: baseEbitda - approvedCost };
+            const rows = [
+              { label: "Revenue",     pl: pl.rev,    ac: ac.rev,    pr: pr.rev,    total: true  },
+              { label: "COGS",        pl: pl.cogs,   ac: ac.cogs,   pr: pr.cogs,   flip: true   },
+              { label: "Gross Profit",pl: pl.gp,     ac: ac.gp,     pr: pr.gp,     bold: true   },
+              { label: "Expenses",    pl: pl.exp,    ac: ac.exp,    pr: pr.exp,    flip: true   },
+              { label: "Net Income",  pl: pl.ni,     ac: ac.ni,     pr: pr.ni,     bold: true   },
+              { label: "EBITDA",      pl: pl.ebitda, ac: ac.ebitda, pr: pr.ebitda, bold: true   },
             ];
+            const pending  = items.filter(w => w.status === "pending").length;
+            const deferred = items.filter(w => w.status === "deferred").length;
+            const declined = items.filter(w => w.status === "rejected").length;
             return (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
-                {stats.map(s => (
-                  <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.color}33`, borderRadius: 10, padding: "12px 16px" }}>
-                    <div style={{ fontSize: 11, color: s.color, fontWeight: 600, marginBottom: 4 }}>{s.label}</div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.count}</div>
-                    {s.cost != null && <div style={{ fontSize: 11, color: s.color, opacity: 0.8, marginTop: 2 }}>{fmtM(s.cost)} in 2026</div>}
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>2026 P&amp;L Snapshot</span>
+                  <div style={{ display: "flex", gap: 12, fontSize: 11, color: C.textDim }}>
+                    <span style={{ color: "#d97706", fontWeight: 600 }}>{pending} pending</span>
+                    <span style={{ color: "#6b7280" }}>{deferred} deferred</span>
+                    <span style={{ color: "#dc2626" }}>{declined} declined</span>
                   </div>
-                ))}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 0, fontSize: 12 }}>
+                  <div style={{ padding: "6px 10px", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `2px solid ${C.cardBorder}` }}></div>
+                  {["Plan", "Actuals (YTD)", "Proj + Approved"].map(h => (
+                    <div key={h} style={{ padding: "6px 10px", textAlign: "right", color: h === "Proj + Approved" ? C.accent : C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `2px solid ${C.cardBorder}` }}>{h}</div>
+                  ))}
+                  {rows.map(row => (
+                    <React.Fragment key={row.label}>
+                      <div style={{ padding: "8px 10px", color: row.bold ? C.actual : C.textDim, fontWeight: row.bold ? 600 : 400, background: row.bold ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>{row.label}</div>
+                      <div style={{ padding: "8px 10px", textAlign: "right", color: row.bold ? C.actual : C.text, fontWeight: row.bold ? 600 : 400, background: row.bold ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>{fmtM(row.pl)}</div>
+                      <div style={{ padding: "8px 10px", textAlign: "right", color: row.bold ? C.actual : C.text, fontWeight: row.bold ? 600 : 400, background: row.bold ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>{fmtM(row.ac)}</div>
+                      <div style={{ padding: "8px 10px", textAlign: "right", color: row.bold ? C.accent : C.accent, fontWeight: row.bold ? 700 : 500, background: row.bold ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>{fmtM(row.pr)}</div>
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
             );
           })()}
@@ -2426,8 +2450,25 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                               <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{cost27 > 0 ? fmt(cost27) : "—"}</td>
                               <td style={{ padding: "7px 10px" }}>
                                 <div style={{ display: "flex", gap: 5 }}>
-                                  <button onClick={() => setStatus("approved")} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#f0fdf4", color: "#16a34a", border: "1px solid #16a34a44", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>✓ Approve</button>
-                                  <button onClick={() => setStatus("deferred")} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#f9fafb", color: "#6b7280", border: "1px solid #6b728044", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>→ Defer</button>
+                                  <button onClick={() => setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"approved", approvedAt: Date.now()} : w))} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#f0fdf4", color: "#16a34a", border: "1px solid #16a34a44", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>✓ Approve</button>
+                                  {deferTarget?.id === item.id ? (
+                                    <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#f9fafb", border: "1px solid #6b728044", borderRadius: 6, padding: "3px 8px" }}>
+                                      <span style={{ fontSize: 10, color: "#6b7280", whiteSpace: "nowrap" }}>Defer to:</span>
+                                      <select value={deferTarget.month} onChange={e => setDeferTarget(t => ({...t, month: e.target.value}))} style={{ fontSize: 10, border: "none", background: "transparent", color: "#374151", cursor: "pointer" }}>
+                                        {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map(m => <option key={m}>{m}</option>)}
+                                      </select>
+                                      <select value={deferTarget.year} onChange={e => setDeferTarget(t => ({...t, year: parseInt(e.target.value)}))} style={{ fontSize: 10, border: "none", background: "transparent", color: "#374151", cursor: "pointer" }}>
+                                        {[2026,2027,2028,2029].map(y => <option key={y}>{y}</option>)}
+                                      </select>
+                                      <button onClick={() => {
+                                        setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"deferred", deferredUntil: `${deferTarget.month} ${deferTarget.year}`} : w));
+                                        setDeferTarget(null);
+                                      }} style={{ fontSize: 10, padding: "2px 8px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>Confirm</button>
+                                      <button onClick={() => setDeferTarget(null)} style={{ fontSize: 10, padding: "2px 6px", background: "none", border: "none", cursor: "pointer", color: "#9ca3af" }}>✕</button>
+                                    </div>
+                                  ) : (
+                                    <button onClick={() => setDeferTarget({ id: item.id, month: "Jan", year: 2027 })} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#f9fafb", color: "#6b7280", border: "1px solid #6b728044", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>→ Defer</button>
+                                  )}
                                   <button onClick={() => setStatus("rejected")} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, background: "#fef2f2", color: "#dc2626", border: "1px solid #dc262644", borderRadius: 5, cursor: "pointer" }}>✕</button>
                                 </div>
                               </td>
@@ -2442,22 +2483,26 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
             );
           })()}
 
-          {/* ── Approved — pushed to projections ── */}
-          {(() => {
+          {/* ── Pushed to projections panel (toggle) ── */}
+          {showPushed && (() => {
             const approved = items.filter(w => w.status === "approved" || w.status === "plan");
-            if (!approved.length) return null;
+            const totalCost26 = approved.reduce((s,w) => s+itemYearCost(w,2026), 0);
+            const totalCost27 = approved.reduce((s,w) => s+itemYearCost(w,2027), 0);
             return (
-              <div style={card}>
+              <div style={{ ...card, border: `1px solid ${C.accent}44`, background: "#f0fdf408" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#16a34a" }}>✓ Pushed to projections ({approved.length})</span>
-                  <span style={{ fontSize: 11, color: C.textDim }}>{fmtM(approved.reduce((s,w) => s+itemYearCost(w,2026),0))} impact in 2026</span>
+                  <div>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#16a34a" }}>✓ Passed — in projections</span>
+                    <span style={{ fontSize: 11, color: C.textDim, marginLeft: 10 }}>{fmtM(totalCost26)} in 2026 · {fmtM(totalCost27)} in 2027</span>
+                  </div>
+                  <button onClick={() => setShowPushed(false)} style={{ fontSize: 12, color: C.textDim, background: "none", border: "none", cursor: "pointer" }}>✕ Close</button>
                 </div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <thead>
                       <tr style={{ background: C.headerBg }}>
-                        {["Priority", "Item", "GL Account", "Annual Cost", "Start", "2026 Impact", "2027 Impact", ""].map(h => (
-                          <th key={h} style={{ padding: "7px 10px", textAlign: ["Annual Cost","2026 Impact","2027 Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
+                        {["Priority", "Item", "GL Account", "Annual Cost", "Start", "2026 Impact", "2027 Impact", "Date approved", ""].map(h => (
+                          <th key={h} style={{ padding: "7px 10px", textAlign: ["Annual Cost","2026 Impact","2027 Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -2469,19 +2514,23 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                         const sy = parseInt(item.startYear) || 2026;
                         const smIdx = MONTHS.indexOf(item.startMonth || "Jan");
                         const isPartial = sy === 2026 && smIdx > 0;
+                        const approvedDate = item.approvedAt
+                          ? new Date(item.approvedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })
+                          : item.status === "plan" ? "In original plan" : "—";
                         return (
-                          <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: "#f0fdf422" }}>
+                          <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: idx % 2 === 0 ? "#f0fdf411" : "transparent" }}>
                             <td style={{ padding: "7px 10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color, whiteSpace: "nowrap" }}>{item.priority}</span></td>
-                            <td style={{ padding: "7px 10px", color: C.actual, fontWeight: 500, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
-                            <td style={{ padding: "7px 10px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode || "—"}</td>
+                            <td style={{ padding: "7px 10px", color: C.actual, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
+                            <td style={{ padding: "7px 10px", color: C.textDim, fontFamily: "monospace", fontSize: 10 }}>{item.glCode || "—"}</td>
                             <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
                             <td style={{ padding: "7px 10px", color: C.textDim, whiteSpace: "nowrap" }}>{item.startMonth || "Jan"} {item.startYear || 2026}</td>
                             <td style={{ padding: "7px 10px", textAlign: "right", color: isPartial ? C.accent : C.text, fontWeight: isPartial ? 600 : 400 }}>
                               {cost26 > 0 ? fmt(cost26) : "—"}{isPartial && <span style={{ fontSize: 9, color: C.textDim, marginLeft: 3 }}>({12-smIdx}mo)</span>}
                             </td>
                             <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{cost27 > 0 ? fmt(cost27) : "—"}</td>
+                            <td style={{ padding: "7px 10px", color: C.textDim, fontSize: 11, whiteSpace: "nowrap" }}>{approvedDate}</td>
                             <td style={{ padding: "7px 10px" }}>
-                              <button onClick={() => setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"pending"} : w))} style={{ padding: "2px 8px", fontSize: 10, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 5, cursor: "pointer", color: C.textDim }}>↩ Reopen</button>
+                              <button onClick={() => setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"pending", approvedAt: undefined} : w))} style={{ padding: "2px 8px", fontSize: 10, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 5, cursor: "pointer", color: C.textDim }}>↩ Reopen</button>
                             </td>
                           </tr>
                         );
@@ -2518,7 +2567,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                         return (
                           <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, opacity: 0.75 }}>
                             <td style={{ padding: "7px 10px" }}>
-                              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, fontWeight: 600, background: isDeclined ? "#fef2f2" : "#f9fafb", color: isDeclined ? "#dc2626" : "#6b7280" }}>{isDeclined ? "Declined" : "Deferred"}</span>
+                              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, fontWeight: 600, background: isDeclined ? "#fef2f2" : "#f9fafb", color: isDeclined ? "#dc2626" : "#6b7280" }}>{isDeclined ? "Declined" : `Deferred${item.deferredUntil ? " → " + item.deferredUntil : ""}`}</span>
                             </td>
                             <td style={{ padding: "7px 10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color }}>{item.priority}</span></td>
                             <td style={{ padding: "7px 10px", color: C.textDim, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
@@ -2545,21 +2594,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
           )}
         </div>
       )}
-      {tab === "comparison" && (
-        <div style={{ ...card, textAlign: "center", padding: "48px 0" }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 6 }}>Side-by-side comparison</div>
-          <div style={{ fontSize: 13, color: C.textDim }}>All scenario versions in a single table — coming soon.</div>
-        </div>
-      )}
 
-      {tab === "waterfall" && (
-        <div style={{ ...card, textAlign: "center", padding: "48px 0" }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>🌊</div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 6 }}>Waterfall / bridge chart</div>
-          <div style={{ fontSize: 13, color: C.textDim }}>Visualize what drives variance between scenarios — coming soon.</div>
-        </div>
-      )}
     </div>
   );
 }
