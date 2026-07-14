@@ -2619,6 +2619,7 @@ const YOY_2025_ADJ_EBITDA = YOY_ADJ[2025];
 const YOY_2025_ADDBACK    = YOY_ADDBACK[2025];
 
 function AdjEbitda({ approvedItems, adjOverrides, setAdjOverrides, projOverrides, rolledItems }) {
+  const fmtM = v => { const a = Math.abs(v); if (a >= 1000000) return "$" + (v/1000000).toFixed(1)+"M"; if (a >= 1000) return "$" + (v/1000).toFixed(0)+"K"; return "$" + v.toFixed(0); };
   const C = useC();
   const [year, setYear] = useState(2026);
 
