@@ -2154,8 +2154,9 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
   const [newItemPriority, setNewItemPriority] = React.useState("Operations");
   const [showNewVersion, setShowNewVersion] = React.useState(false);
   const [newVersionName, setNewVersionName] = React.useState("");
-  const [showPushed, setShowPushed] = React.useState(false);
+  const [activeView, setActiveView] = React.useState(null); // null | "pending" | "pushed" | "declined"
   const [deferTarget, setDeferTarget] = React.useState(null); // { id, month, year }
+  const [newItemType, setNewItemType] = React.useState("recurring");
 
   const SCENARIO_DEFS = [
     { id: "base",       name: "Base",          color: "#3B6D11" },
@@ -2192,6 +2193,8 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
   const itemYearCost = (item, year) => {
     const sy = parseInt(item.startYear) || 2026;
     const sm = MONTHS.indexOf(item.startMonth || "Jan");
+    // One-time items: full cost in startYear only (no proration)
+    if (item.itemType === "one-time") return year === sy ? (item.annualCost || 0) : 0;
     const ey = parseInt(item.endYear) || 2030;
     const em = MONTHS.indexOf(item.endMonth || "Dec") >= 0 ? MONTHS.indexOf(item.endMonth || "Dec") : 11;
     if (year < sy || year > ey) return 0;
@@ -2294,16 +2297,30 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Planning Tracker</h2>
-        <button onClick={() => setShowPushed(v => !v)} style={{
-          display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", fontSize: 12, fontWeight: 500,
-          background: showPushed ? C.accentSoft : C.card, color: showPushed ? C.accent : C.textDim,
-          border: `1px solid ${showPushed ? C.accent + "55" : C.cardBorder}`, borderRadius: 8, cursor: "pointer",
-        }}>
-          ✓ Passed ({items.filter(w => w.status === "approved" || w.status === "plan").length})
-        </button>
-      </div>
+      {(() => {
+        const nPending  = items.filter(w => w.status === "pending").length;
+        const nPushed   = items.filter(w => w.status === "approved" || w.status === "plan").length;
+        const nDeclined = items.filter(w => w.status === "rejected" || w.status === "deferred").length;
+        const navBtn = (view, label, count, color) => (
+          <button onClick={() => setActiveView(activeView === view ? null : view)} style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "6px 16px", fontSize: 12, fontWeight: 500,
+            background: activeView === view ? color + "18" : C.card,
+            color: activeView === view ? color : C.textDim,
+            border: `1px solid ${activeView === view ? color + "55" : C.cardBorder}`,
+            borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
+          }}>{label} <span style={{ fontWeight: 700 }}>({count})</span></button>
+        );
+        return (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Planning Tracker</h2>
+            <div style={{ display: "flex", gap: 8 }}>
+              {navBtn("pushed",   "✓ Pushed to Projections", nPushed,   "#16a34a")}
+              {navBtn("pending",  "⏳ Pending",               nPending,  "#d97706")}
+              {navBtn("declined", "✕ Declined & Deferred",   nDeclined, "#dc2626")}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* KPI strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
@@ -2325,212 +2342,142 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
       {tab === "planning" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-          {/* ── P&L Snapshot ── */}
-          {(() => {
-            const k26    = KPIS_ALL["2026"] || {};
-            const s12    = arr => (arr||[]).reduce((a,v)=>a+(v||0),0);
-            const sYTD   = arr => (arr||[]).slice(0, ACTUALS_THRU+1).reduce((a,v)=>a+(v||0),0);
-            // Plan column (full year 2026 plan)
-            const pl = { rev: s12(PLAN_2026.rev), cogs: s12(PLAN_2026.cogs), gp: s12(PLAN_2026.gp), exp: s12(PLAN_2026.exp), ni: s12(PLAN_2026.ni), ebitda: s12(PLAN_2026.ni) + s12(PLAN_2026.da) };
-            // Actuals column (YTD Jan–May)
-            const ac = { rev: sYTD(k26.rev), cogs: sYTD(k26.cogs), gp: sYTD(k26.gp), exp: sYTD(k26.exp), ni: sYTD(k26.ni), ebitda: sYTD(k26.ebitda) };
-            // Projections + Approved (full year blend: actuals + proj + approved items)
-            const approvedCost = planItemsExp(2026, ["approved","plan"]);
-            const pr = { rev: baseRev, cogs: rawBase.cogs||0, gp: baseGp, exp: baseExp + approvedCost, ni: baseNi - approvedCost, ebitda: baseEbitda - approvedCost };
-            const rows = [
-              { label: "Revenue",     pl: pl.rev,    ac: ac.rev,    pr: pr.rev,    total: true  },
-              { label: "COGS",        pl: pl.cogs,   ac: ac.cogs,   pr: pr.cogs,   flip: true   },
-              { label: "Gross Profit",pl: pl.gp,     ac: ac.gp,     pr: pr.gp,     bold: true   },
-              { label: "Expenses",    pl: pl.exp,    ac: ac.exp,    pr: pr.exp,    flip: true   },
-              { label: "Net Income",  pl: pl.ni,     ac: ac.ni,     pr: pr.ni,     bold: true   },
-              { label: "EBITDA",      pl: pl.ebitda, ac: ac.ebitda, pr: pr.ebitda, bold: true   },
-            ];
-            const pending  = items.filter(w => w.status === "pending").length;
-            const deferred = items.filter(w => w.status === "deferred").length;
-            const declined = items.filter(w => w.status === "rejected").length;
+          {/* ── Detail views (full item tables) ── */}
+          {activeView !== null && (() => {
+            const isPushed   = activeView === "pushed";
+            const isPending  = activeView === "pending";
+            const isDeclined = activeView === "declined";
+            const viewItems  = isPushed
+              ? items.filter(w => w.status === "approved" || w.status === "plan")
+              : isPending
+                ? items.filter(w => w.status === "pending")
+                : items.filter(w => w.status === "rejected" || w.status === "deferred");
+            const viewTitle  = isPushed ? "✓ Pushed to Projections" : isPending ? "⏳ Pending — awaiting decision" : "✕ Declined & Deferred";
+            const viewColor  = isPushed ? "#16a34a" : isPending ? "#d97706" : "#dc2626";
+
             return (
-              <div style={card}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>2026 P&amp;L Snapshot</span>
-                  <div style={{ display: "flex", gap: 12, fontSize: 11, color: C.textDim }}>
-                    <span style={{ color: "#d97706", fontWeight: 600 }}>{pending} pending</span>
-                    <span style={{ color: "#6b7280" }}>{deferred} deferred</span>
-                    <span style={{ color: "#dc2626" }}>{declined} declined</span>
+              <div style={{ ...card, border: `1px solid ${viewColor}33` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: viewColor }}>{viewTitle} ({viewItems.length})</span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {isPending && !showAddItem && (
+                      <button onClick={() => setShowAddItem(true)} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>＋ Propose item</button>
+                    )}
+                    <button onClick={() => setActiveView(null)} style={{ fontSize: 12, color: C.textDim, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>← Back</button>
                   </div>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 0, fontSize: 12 }}>
-                  <div style={{ padding: "6px 10px", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `2px solid ${C.cardBorder}` }}></div>
-                  {["Plan", "Actuals (YTD)", "Proj + Approved"].map(h => (
-                    <div key={h} style={{ padding: "6px 10px", textAlign: "right", color: h === "Proj + Approved" ? C.accent : C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `2px solid ${C.cardBorder}` }}>{h}</div>
-                  ))}
-                  {rows.map(row => (
-                    <React.Fragment key={row.label}>
-                      <div style={{ padding: "8px 10px", color: row.bold ? C.actual : C.textDim, fontWeight: row.bold ? 600 : 400, background: row.bold ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>{row.label}</div>
-                      <div style={{ padding: "8px 10px", textAlign: "right", color: row.bold ? C.actual : C.text, fontWeight: row.bold ? 600 : 400, background: row.bold ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>{fmtM(row.pl)}</div>
-                      <div style={{ padding: "8px 10px", textAlign: "right", color: row.bold ? C.actual : C.text, fontWeight: row.bold ? 600 : 400, background: row.bold ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>{fmtM(row.ac)}</div>
-                      <div style={{ padding: "8px 10px", textAlign: "right", color: row.bold ? C.accent : C.accent, fontWeight: row.bold ? 700 : 500, background: row.bold ? C.accentSoft : "transparent", borderBottom: `1px solid ${C.cardBorder}33` }}>{fmtM(row.pr)}</div>
-                    </React.Fragment>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
 
-          {/* ── Pending — awaiting decision ── */}
-          {(() => {
-            const pending = items.filter(w => w.status === "pending");
-            if (!pending.length && !showAddItem) return null;
-            return (
-              <div style={card}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>Pending — awaiting decision ({pending.length})</span>
-                  {!showAddItem && (
-                    <button onClick={() => setShowAddItem(true)} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>＋ Propose item</button>
-                  )}
-                </div>
-
-                {showAddItem && (
+                {isPending && showAddItem && (
                   <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 8, border: `1px solid ${C.accent}55`, background: C.accentSoft, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
                     <div style={{ flex: 2, minWidth: 180 }}>
                       <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>ITEM NAME</div>
-                      <input value={newItemName} onChange={e => setNewItemName(e.target.value)} placeholder="e.g. Cloud infrastructure upgrade" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
+                      <input value={newItemName} onChange={e => setNewItemName(e.target.value)} placeholder="e.g. Recruitment fee" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
                     </div>
-                    <div style={{ flex: 1, minWidth: 110 }}>
+                    <div style={{ flex: 1, minWidth: 100 }}>
                       <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>ANNUAL COST</div>
                       <input value={newItemCost} onChange={e => setNewItemCost(e.target.value)} placeholder="$" type="number" style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }} />
                     </div>
-                    <div style={{ flex: 1, minWidth: 130 }}>
+                    <div style={{ flex: 1, minWidth: 120 }}>
                       <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>PRIORITY</div>
                       <select value={newItemPriority} onChange={e => setNewItemPriority(e.target.value)} style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }}>
                         {["Keep Lights On","Revenue Growth","Product","Retention","Security","Operations","Leadership","Innovation"].map(p => <option key={p}>{p}</option>)}
                       </select>
                     </div>
+                    <div style={{ flex: 1, minWidth: 120 }}>
+                      <div style={{ fontSize: 10, color: C.textDim, marginBottom: 4, fontWeight: 600 }}>TYPE</div>
+                      <select value={newItemType || "recurring"} onChange={e => setNewItemType(e.target.value)} style={{ padding: "6px 10px", fontSize: 12, borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: C.card, color: C.actual, width: "100%", boxSizing: "border-box" }}>
+                        <option value="recurring">Recurring</option>
+                        <option value="one-time">One-time</option>
+                      </select>
+                    </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button onClick={() => {
                         if (!newItemName.trim()) return;
-                        const newItem = { id: Date.now(), name: newItemName.trim(), priority: newItemPriority, annualCost: parseFloat(newItemCost) || 0, status: "pending", requester: "", glCode: "", startMonth: "Jan", startYear: 2026 };
-                        setWishList(prev => [...(prev || WISH_LIST), newItem]);
-                        setNewItemName(""); setNewItemCost(""); setShowAddItem(false);
-                      }} style={{ padding: "6px 16px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>Submit</button>
-                      <button onClick={() => { setShowAddItem(false); setNewItemName(""); setNewItemCost(""); }} style={{ padding: "6px 12px", fontSize: 12, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, cursor: "pointer", color: C.textDim }}>Cancel</button>
+                        const ni = { id: Date.now(), name: newItemName.trim(), priority: newItemPriority, annualCost: parseFloat(newItemCost)||0, status: "pending", requester:"", glCode:"", startMonth:"Jan", startYear:2026, itemType: newItemType||"recurring" };
+                        setWishList(prev => [...(prev||WISH_LIST), ni]);
+                        setNewItemName(""); setNewItemCost(""); setNewItemType("recurring"); setShowAddItem(false);
+                      }} style={{ padding: "6px 16px", fontSize: 12, fontWeight: 600, background: C.accent, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>Submit</button>
+                      <button onClick={() => { setShowAddItem(false); setNewItemName(""); setNewItemCost(""); }} style={{ padding: "6px 10px", fontSize: 12, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, cursor: "pointer", color: C.textDim }}>Cancel</button>
                     </div>
                   </div>
                 )}
 
-                {pending.length > 0 && (
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                      <thead>
-                        <tr style={{ background: C.headerBg }}>
-                          {["Priority", "Item", "Requester", "GL Account", "Annual Cost", "Start", "2026 Impact", "2027 Impact", "Decision"].map(h => (
-                            <th key={h} style={{ padding: "7px 10px", textAlign: ["Annual Cost","2026 Impact","2027 Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pending.map((item, idx) => {
-                          const pt = priorityTag(item.priority);
-                          const cost26 = itemYearCost(item, 2026);
-                          const cost27 = itemYearCost(item, 2027);
-                          const sy = parseInt(item.startYear) || 2026;
-                          const smIdx = MONTHS.indexOf(item.startMonth || "Jan");
-                          const isPartial = sy === 2026 && smIdx > 0;
-                          const setStatus = (newStatus) => setWishList(prev => (prev || WISH_LIST).map(w => w.id === item.id ? { ...w, status: newStatus } : w));
-                          return (
-                            <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: idx % 2 === 0 ? "transparent" : `${C.cardBorder}18` }}>
-                              <td style={{ padding: "7px 10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color, whiteSpace: "nowrap" }}>{item.priority}</span></td>
-                              <td style={{ padding: "7px 10px", color: C.actual, fontWeight: 500, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
-                              <td style={{ padding: "7px 10px", color: C.textDim }}>{item.requester || "—"}</td>
-                              <td style={{ padding: "7px 10px", color: C.textDim, fontFamily: "monospace", fontSize: 11 }}>{item.glCode || "—"}</td>
-                              <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
-                              <td style={{ padding: "7px 10px", color: C.textDim, whiteSpace: "nowrap" }}>{item.startMonth || "Jan"} {item.startYear || 2026}</td>
-                              <td style={{ padding: "7px 10px", textAlign: "right", color: isPartial ? C.accent : C.text, fontWeight: isPartial ? 600 : 400 }}>
-                                {cost26 > 0 ? fmt(cost26) : "—"}{isPartial && <span style={{ fontSize: 9, color: C.textDim, marginLeft: 3 }}>({12-smIdx}mo)</span>}
-                              </td>
-                              <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{cost27 > 0 ? fmt(cost27) : "—"}</td>
-                              <td style={{ padding: "7px 10px" }}>
-                                <div style={{ display: "flex", gap: 5 }}>
-                                  <button onClick={() => setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"approved", approvedAt: Date.now()} : w))} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#f0fdf4", color: "#16a34a", border: "1px solid #16a34a44", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>✓ Approve</button>
-                                  {deferTarget?.id === item.id ? (
-                                    <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#f9fafb", border: "1px solid #6b728044", borderRadius: 6, padding: "3px 8px" }}>
-                                      <span style={{ fontSize: 10, color: "#6b7280", whiteSpace: "nowrap" }}>Defer to:</span>
-                                      <select value={deferTarget.month} onChange={e => setDeferTarget(t => ({...t, month: e.target.value}))} style={{ fontSize: 10, border: "none", background: "transparent", color: "#374151", cursor: "pointer" }}>
-                                        {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map(m => <option key={m}>{m}</option>)}
-                                      </select>
-                                      <select value={deferTarget.year} onChange={e => setDeferTarget(t => ({...t, year: parseInt(e.target.value)}))} style={{ fontSize: 10, border: "none", background: "transparent", color: "#374151", cursor: "pointer" }}>
-                                        {[2026,2027,2028,2029].map(y => <option key={y}>{y}</option>)}
-                                      </select>
-                                      <button onClick={() => {
-                                        setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"deferred", deferredUntil: `${deferTarget.month} ${deferTarget.year}`} : w));
-                                        setDeferTarget(null);
-                                      }} style={{ fontSize: 10, padding: "2px 8px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>Confirm</button>
-                                      <button onClick={() => setDeferTarget(null)} style={{ fontSize: 10, padding: "2px 6px", background: "none", border: "none", cursor: "pointer", color: "#9ca3af" }}>✕</button>
-                                    </div>
-                                  ) : (
-                                    <button onClick={() => setDeferTarget({ id: item.id, month: "Jan", year: 2027 })} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#f9fafb", color: "#6b7280", border: "1px solid #6b728044", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>→ Defer</button>
-                                  )}
-                                  <button onClick={() => setStatus("rejected")} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, background: "#fef2f2", color: "#dc2626", border: "1px solid #dc262644", borderRadius: 5, cursor: "pointer" }}>✕</button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* ── Pushed to projections panel (toggle) ── */}
-          {showPushed && (() => {
-            const approved = items.filter(w => w.status === "approved" || w.status === "plan");
-            const totalCost26 = approved.reduce((s,w) => s+itemYearCost(w,2026), 0);
-            const totalCost27 = approved.reduce((s,w) => s+itemYearCost(w,2027), 0);
-            return (
-              <div style={{ ...card, border: `1px solid ${C.accent}44`, background: "#f0fdf408" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <div>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#16a34a" }}>✓ Passed — in projections</span>
-                    <span style={{ fontSize: 11, color: C.textDim, marginLeft: 10 }}>{fmtM(totalCost26)} in 2026 · {fmtM(totalCost27)} in 2027</span>
-                  </div>
-                  <button onClick={() => setShowPushed(false)} style={{ fontSize: 12, color: C.textDim, background: "none", border: "none", cursor: "pointer" }}>✕ Close</button>
-                </div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <thead>
                       <tr style={{ background: C.headerBg }}>
-                        {["Priority", "Item", "GL Account", "Annual Cost", "Start", "2026 Impact", "2027 Impact", "Date approved", ""].map(h => (
-                          <th key={h} style={{ padding: "7px 10px", textAlign: ["Annual Cost","2026 Impact","2027 Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>{h}</th>
+                        {(isPushed
+                          ? ["Priority","Item","Type","GL Account","Cost","Start","2026 Impact","2027 Impact","Date Approved",""]
+                          : isPending
+                            ? ["Priority","Item","Type","GL Account","Cost","Start","2026 Impact","2027+ Impact","Decision"]
+                            : ["Status","Priority","Item","Type","Cost","2026 Impact",""]
+                        ).map(h => (
+                          <th key={h} style={{ padding: "7px 10px", textAlign: ["Cost","2026 Impact","2027 Impact","2027+ Impact"].includes(h) ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}`, whiteSpace: "nowrap" }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {approved.map((item, idx) => {
+                      {viewItems.map((item, idx) => {
                         const pt = priorityTag(item.priority);
                         const cost26 = itemYearCost(item, 2026);
                         const cost27 = itemYearCost(item, 2027);
-                        const sy = parseInt(item.startYear) || 2026;
-                        const smIdx = MONTHS.indexOf(item.startMonth || "Jan");
-                        const isPartial = sy === 2026 && smIdx > 0;
+                        const cost27plus = item.itemType === "one-time" ? 0 : cost27;
+                        const sy = parseInt(item.startYear)||2026;
+                        const smIdx = MONTHS.indexOf(item.startMonth||"Jan");
+                        const isPartial = item.itemType !== "one-time" && sy === 2026 && smIdx > 0;
                         const approvedDate = item.approvedAt
-                          ? new Date(item.approvedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })
-                          : item.status === "plan" ? "In original plan" : "—";
+                          ? new Date(item.approvedAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"2-digit"})
+                          : item.status==="plan" ? "Original plan" : "—";
+                        const typeTag = item.itemType === "one-time"
+                          ? { label:"One-time", bg:"#fef9c3", color:"#854d0e" }
+                          : { label:"Recurring", bg:"#f0fdf4", color:"#166534" };
                         return (
-                          <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, background: idx % 2 === 0 ? "#f0fdf411" : "transparent" }}>
-                            <td style={{ padding: "7px 10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color, whiteSpace: "nowrap" }}>{item.priority}</span></td>
-                            <td style={{ padding: "7px 10px", color: C.actual, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
-                            <td style={{ padding: "7px 10px", color: C.textDim, fontFamily: "monospace", fontSize: 10 }}>{item.glCode || "—"}</td>
-                            <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
-                            <td style={{ padding: "7px 10px", color: C.textDim, whiteSpace: "nowrap" }}>{item.startMonth || "Jan"} {item.startYear || 2026}</td>
-                            <td style={{ padding: "7px 10px", textAlign: "right", color: isPartial ? C.accent : C.text, fontWeight: isPartial ? 600 : 400 }}>
-                              {cost26 > 0 ? fmt(cost26) : "—"}{isPartial && <span style={{ fontSize: 9, color: C.textDim, marginLeft: 3 }}>({12-smIdx}mo)</span>}
+                          <tr key={item.id} style={{ borderBottom:`1px solid ${C.cardBorder}33`, background: idx%2===0 ? "transparent" : `${C.cardBorder}11` }}>
+                            {isDeclined && (
+                              <td style={{ padding:"7px 10px" }}>
+                                <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:600, background: item.status==="rejected" ? "#fef2f2" : "#f9fafb", color: item.status==="rejected" ? "#dc2626" : "#6b7280" }}>
+                                  {item.status==="rejected" ? "Declined" : `Deferred${item.deferredUntil?" → "+item.deferredUntil:""}`}
+                                </span>
+                              </td>
+                            )}
+                            <td style={{ padding:"7px 10px" }}><span style={{ fontSize:10, padding:"2px 7px", borderRadius:20, fontWeight:700, background:pt.bg, color:pt.color, whiteSpace:"nowrap" }}>{item.priority}</span></td>
+                            <td style={{ padding:"7px 10px", color:C.actual, fontWeight:500, maxWidth:220, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={item.name}>{item.name}</td>
+                            <td style={{ padding:"7px 10px" }}><span style={{ fontSize:10, padding:"2px 7px", borderRadius:20, fontWeight:600, background:typeTag.bg, color:typeTag.color, whiteSpace:"nowrap" }}>{typeTag.label}</span></td>
+                            {!isDeclined && <td style={{ padding:"7px 10px", color:C.textDim, fontFamily:"monospace", fontSize:10 }}>{item.glCode||"—"}</td>}
+                            <td style={{ padding:"7px 10px", textAlign:"right", color:C.text }}>{item.annualCost>0 ? fmt(item.annualCost) : "TBD"}</td>
+                            {!isDeclined && <td style={{ padding:"7px 10px", color:C.textDim, whiteSpace:"nowrap" }}>{item.startMonth||"Jan"} {item.startYear||2026}</td>}
+                            <td style={{ padding:"7px 10px", textAlign:"right", color: isPartial ? C.accent : C.text, fontWeight: isPartial?600:400 }}>
+                              {cost26>0 ? fmt(cost26) : "—"}{isPartial && <span style={{ fontSize:9, color:C.textDim, marginLeft:3 }}>({12-smIdx}mo)</span>}
                             </td>
-                            <td style={{ padding: "7px 10px", textAlign: "right", color: C.text }}>{cost27 > 0 ? fmt(cost27) : "—"}</td>
-                            <td style={{ padding: "7px 10px", color: C.textDim, fontSize: 11, whiteSpace: "nowrap" }}>{approvedDate}</td>
-                            <td style={{ padding: "7px 10px" }}>
-                              <button onClick={() => setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"pending", approvedAt: undefined} : w))} style={{ padding: "2px 8px", fontSize: 10, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 5, cursor: "pointer", color: C.textDim }}>↩ Reopen</button>
+                            {!isDeclined && (
+                              <td style={{ padding:"7px 10px", textAlign:"right", color: cost27plus===0 ? C.textDim : C.text, fontStyle: item.itemType==="one-time"?"italic":"normal", fontSize: item.itemType==="one-time"?11:12 }}>
+                                {item.itemType==="one-time" ? "—  (one-time)" : cost27plus>0 ? fmt(cost27plus) : "—"}
+                              </td>
+                            )}
+                            {isPushed && <td style={{ padding:"7px 10px", color:C.textDim, fontSize:11, whiteSpace:"nowrap" }}>{approvedDate}</td>}
+                            <td style={{ padding:"7px 10px" }}>
+                              {isPending ? (
+                                <div style={{ display:"flex", gap:5, alignItems:"center" }}>
+                                  <button onClick={() => setWishList(prev=>(prev||WISH_LIST).map(w=>w.id===item.id?{...w,status:"approved",approvedAt:Date.now()}:w))} style={{ padding:"3px 10px", fontSize:11, fontWeight:600, background:"#f0fdf4", color:"#16a34a", border:"1px solid #16a34a44", borderRadius:5, cursor:"pointer" }}>✓ Approve</button>
+                                  {deferTarget?.id===item.id ? (
+                                    <div style={{ display:"flex", alignItems:"center", gap:4, background:"#f9fafb", border:"1px solid #6b728044", borderRadius:6, padding:"3px 8px" }}>
+                                      <select value={deferTarget.month} onChange={e=>setDeferTarget(t=>({...t,month:e.target.value}))} style={{ fontSize:10, border:"none", background:"transparent", color:"#374151", cursor:"pointer" }}>
+                                        {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map(m=><option key={m}>{m}</option>)}
+                                      </select>
+                                      <select value={deferTarget.year} onChange={e=>setDeferTarget(t=>({...t,year:parseInt(e.target.value)}))} style={{ fontSize:10, border:"none", background:"transparent", color:"#374151", cursor:"pointer" }}>
+                                        {[2026,2027,2028,2029].map(y=><option key={y}>{y}</option>)}
+                                      </select>
+                                      <button onClick={() => { setWishList(prev=>(prev||WISH_LIST).map(w=>w.id===item.id?{...w,status:"deferred",deferredUntil:`${deferTarget.month} ${deferTarget.year}`}:w)); setDeferTarget(null); }} style={{ fontSize:10, padding:"2px 8px", background:"#6b7280", color:"#fff", border:"none", borderRadius:4, cursor:"pointer" }}>OK</button>
+                                      <button onClick={()=>setDeferTarget(null)} style={{ fontSize:10, padding:"2px 5px", background:"none", border:"none", cursor:"pointer", color:"#9ca3af" }}>✕</button>
+                                    </div>
+                                  ) : (
+                                    <button onClick={()=>setDeferTarget({id:item.id,month:"Jan",year:2027})} style={{ padding:"3px 10px", fontSize:11, fontWeight:600, background:"#f9fafb", color:"#6b7280", border:"1px solid #6b728044", borderRadius:5, cursor:"pointer" }}>→ Defer</button>
+                                  )}
+                                  <button onClick={()=>setWishList(prev=>(prev||WISH_LIST).map(w=>w.id===item.id?{...w,status:"rejected"}:w))} style={{ padding:"3px 9px", fontSize:11, fontWeight:600, background:"#fef2f2", color:"#dc2626", border:"1px solid #dc262644", borderRadius:5, cursor:"pointer" }}>✕</button>
+                                </div>
+                              ) : (
+                                <button onClick={()=>setWishList(prev=>(prev||WISH_LIST).map(w=>w.id===item.id?{...w,status:"pending",approvedAt:undefined,deferredUntil:undefined}:w))} style={{ padding:"2px 8px", fontSize:10, background:"none", border:`1px solid ${C.cardBorder}`, borderRadius:5, cursor:"pointer", color:C.textDim }}>↩ Reopen</button>
+                              )}
                             </td>
                           </tr>
                         );
@@ -2542,59 +2489,117 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
             );
           })()}
 
-          {/* ── Declined & Deferred ── */}
-          {(() => {
-            const closed = items.filter(w => w.status === "rejected" || w.status === "deferred");
-            if (!closed.length) return null;
-            return (
-              <div style={card}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.textDim }}>Declined &amp; Deferred ({closed.length})</span>
-                </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          {/* ── Summary view (when no detail panel open) ── */}
+          {activeView === null && (() => {
+            const k26   = KPIS_ALL["2026"]||{};
+            const s12   = arr=>(arr||[]).reduce((a,v)=>a+(v||0),0);
+            const sYTD  = arr=>(arr||[]).slice(0,ACTUALS_THRU+1).reduce((a,v)=>a+(v||0),0);
+            const pl    = { rev:s12(PLAN_2026.rev), cogs:s12(PLAN_2026.cogs), gp:s12(PLAN_2026.gp), exp:s12(PLAN_2026.exp), ni:s12(PLAN_2026.ni), ebitda:s12(PLAN_2026.ni)+s12(PLAN_2026.da) };
+            const ac    = { rev:sYTD(k26.rev), cogs:sYTD(k26.cogs), gp:sYTD(k26.gp), exp:sYTD(k26.exp), ni:sYTD(k26.ni), ebitda:sYTD(k26.ebitda) };
+            const approvedCost = planItemsExp(2026,["approved","plan"]);
+            const pr    = { rev:baseRev, cogs:rawBase.cogs||0, gp:baseGp, exp:baseExp+approvedCost, ni:baseNi-approvedCost, ebitda:baseEbitda-approvedCost };
+            const plRows = [
+              {label:"Revenue",    pl:pl.rev,    ac:ac.rev,    pr:pr.rev,    bold:false},
+              {label:"COGS",       pl:pl.cogs,   ac:ac.cogs,   pr:pr.cogs,   bold:false},
+              {label:"Gross Profit",pl:pl.gp,    ac:ac.gp,     pr:pr.gp,     bold:true},
+              {label:"Expenses",   pl:pl.exp,    ac:ac.exp,    pr:pr.exp,    bold:false},
+              {label:"Net Income", pl:pl.ni,     ac:ac.ni,     pr:pr.ni,     bold:true},
+              {label:"EBITDA",     pl:pl.ebitda, ac:ac.ebitda, pr:pr.ebitda, bold:true},
+            ];
+
+            // Priority summary helper
+            const prioritySummary = (statusFilter) => {
+              const filtered = items.filter(w => statusFilter(w.status));
+              const byPriority = {};
+              filtered.forEach(w => {
+                const p = w.priority||"Other";
+                if (!byPriority[p]) byPriority[p] = {count:0,cost26:0,cost27plus:0};
+                byPriority[p].count++;
+                byPriority[p].cost26     += itemYearCost(w,2026);
+                byPriority[p].cost27plus += w.itemType==="one-time" ? 0 : itemYearCost(w,2027);
+              });
+              return Object.entries(byPriority).sort((a,b)=>b[1].cost26-a[1].cost26);
+            };
+
+            const summarySection = (title, color, bg, statusFilter, viewKey) => {
+              const rows = prioritySummary(statusFilter);
+              if (!rows.length) return null;
+              const total26 = rows.reduce((s,[,v])=>s+v.cost26,0);
+              const total27 = rows.reduce((s,[,v])=>s+v.cost27plus,0);
+              return (
+                <div style={{ ...card, borderLeft:`3px solid ${color}` }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+                    <span style={{ fontSize:13, fontWeight:700, color }}>{title}</span>
+                    <button onClick={()=>setActiveView(viewKey)} style={{ fontSize:11, color:C.accent, background:"none", border:`1px solid ${C.cardBorder}`, borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>View all items →</button>
+                  </div>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                     <thead>
-                      <tr style={{ background: C.headerBg }}>
-                        {["Status", "Priority", "Item", "Annual Cost", ""].map(h => (
-                          <th key={h} style={{ padding: "7px 10px", textAlign: h === "Annual Cost" ? "right" : "left", color: C.textDim, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>
-                        ))}
+                      <tr>
+                        <th style={{ textAlign:"left", padding:"5px 8px", color:C.textDim, fontWeight:600, fontSize:11, borderBottom:`1px solid ${C.cardBorder}` }}>Priority</th>
+                        <th style={{ textAlign:"right", padding:"5px 8px", color:C.textDim, fontWeight:600, fontSize:11, borderBottom:`1px solid ${C.cardBorder}` }}>Items</th>
+                        <th style={{ textAlign:"right", padding:"5px 8px", color:C.textDim, fontWeight:600, fontSize:11, borderBottom:`1px solid ${C.cardBorder}` }}>2026 Impact</th>
+                        <th style={{ textAlign:"right", padding:"5px 8px", color:C.textDim, fontWeight:600, fontSize:11, borderBottom:`1px solid ${C.cardBorder}` }}>2027+ Impact</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {closed.map((item, idx) => {
-                        const pt = priorityTag(item.priority);
-                        const isDeclined = item.status === "rejected";
+                      {rows.map(([priority, v]) => {
+                        const pt = priorityTag(priority);
                         return (
-                          <tr key={item.id} style={{ borderBottom: `1px solid ${C.cardBorder}33`, opacity: 0.75 }}>
-                            <td style={{ padding: "7px 10px" }}>
-                              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, fontWeight: 600, background: isDeclined ? "#fef2f2" : "#f9fafb", color: isDeclined ? "#dc2626" : "#6b7280" }}>{isDeclined ? "Declined" : `Deferred${item.deferredUntil ? " → " + item.deferredUntil : ""}`}</span>
-                            </td>
-                            <td style={{ padding: "7px 10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 700, background: pt.bg, color: pt.color }}>{item.priority}</span></td>
-                            <td style={{ padding: "7px 10px", color: C.textDim, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>{item.name}</td>
-                            <td style={{ padding: "7px 10px", textAlign: "right", color: C.textDim }}>{item.annualCost > 0 ? fmt(item.annualCost) : "TBD"}</td>
-                            <td style={{ padding: "7px 10px" }}>
-                              <button onClick={() => setWishList(prev => (prev||WISH_LIST).map(w => w.id===item.id ? {...w, status:"pending"} : w))} style={{ padding: "2px 8px", fontSize: 10, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 5, cursor: "pointer", color: C.textDim }}>↩ Reopen</button>
-                            </td>
+                          <tr key={priority} style={{ borderBottom:`1px solid ${C.cardBorder}22` }}>
+                            <td style={{ padding:"7px 8px" }}><span style={{ fontSize:11, padding:"2px 8px", borderRadius:20, fontWeight:600, background:pt.bg, color:pt.color }}>{priority}</span></td>
+                            <td style={{ padding:"7px 8px", textAlign:"right", color:C.textDim }}>{v.count} item{v.count!==1?"s":""}</td>
+                            <td style={{ padding:"7px 8px", textAlign:"right", color:C.actual, fontWeight:600 }}>{v.cost26>0?fmtM(v.cost26):"—"}</td>
+                            <td style={{ padding:"7px 8px", textAlign:"right", color: v.cost27plus===0 ? C.textDim : C.text }}>{v.cost27plus>0?fmtM(v.cost27plus):<span style={{fontStyle:"italic",fontSize:11}}>one-time only</span>}</td>
                           </tr>
                         );
                       })}
                     </tbody>
+                    <tfoot>
+                      <tr style={{ background:C.accentSoft }}>
+                        <td style={{ padding:"7px 8px", color:C.accent, fontWeight:700 }}>Total</td>
+                        <td style={{ padding:"7px 8px", textAlign:"right", color:C.textDim, fontWeight:600 }}>{rows.reduce((s,[,v])=>s+v.count,0)}</td>
+                        <td style={{ padding:"7px 8px", textAlign:"right", color:C.accent, fontWeight:700 }}>{fmtM(total26)}</td>
+                        <td style={{ padding:"7px 8px", textAlign:"right", color:C.textDim, fontWeight:600 }}>{total27>0?fmtM(total27):"—"}</td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
-              </div>
+              );
+            };
+
+            return (
+              <>
+                {/* P&L Snapshot */}
+                <div style={card}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+                    <span style={{ fontSize:13, fontWeight:600, color:C.actual }}>2026 P&amp;L Snapshot</span>
+                    <span style={{ fontSize:11, color:C.textDim }}>Actuals Jan–May · Projections include approved items</span>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:0, fontSize:12 }}>
+                    <div style={{ padding:"6px 10px", color:C.textDim, fontWeight:600, fontSize:11, borderBottom:`2px solid ${C.cardBorder}` }}></div>
+                    {["Plan","Actuals (YTD)","Proj + Approved"].map(h=>(
+                      <div key={h} style={{ padding:"6px 10px", textAlign:"right", color:h==="Proj + Approved"?C.accent:C.textDim, fontWeight:600, fontSize:11, borderBottom:`2px solid ${C.cardBorder}` }}>{h}</div>
+                    ))}
+                    {plRows.map(row=>(
+                      <React.Fragment key={row.label}>
+                        <div style={{ padding:"8px 10px", color:row.bold?C.actual:C.textDim, fontWeight:row.bold?600:400, background:row.bold?C.accentSoft:"transparent", borderBottom:`1px solid ${C.cardBorder}33` }}>{row.label}</div>
+                        <div style={{ padding:"8px 10px", textAlign:"right", color:row.bold?C.actual:C.text, fontWeight:row.bold?600:400, background:row.bold?C.accentSoft:"transparent", borderBottom:`1px solid ${C.cardBorder}33` }}>{fmtM(row.pl)}</div>
+                        <div style={{ padding:"8px 10px", textAlign:"right", color:row.bold?C.actual:C.text, fontWeight:row.bold?600:400, background:row.bold?C.accentSoft:"transparent", borderBottom:`1px solid ${C.cardBorder}33` }}>{fmtM(row.ac)}</div>
+                        <div style={{ padding:"8px 10px", textAlign:"right", color:C.accent, fontWeight:row.bold?700:500, background:row.bold?C.accentSoft:"transparent", borderBottom:`1px solid ${C.cardBorder}33` }}>{fmtM(row.pr)}</div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Priority summaries */}
+                {summarySection("✓ Pushed to Projections","#16a34a","#f0fdf4", s=>s==="approved"||s==="plan", "pushed")}
+                {summarySection("⏳ Pending — awaiting decision","#d97706","#fffbeb", s=>s==="pending", "pending")}
+                {summarySection("✕ Declined & Deferred","#dc2626","#fef2f2", s=>s==="rejected"||s==="deferred", "declined")}
+              </>
             );
           })()}
-
-          {/* Empty state */}
-          {items.every(w => !["pending"].includes(w.status)) && !showAddItem && (
-            <div style={{ textAlign: "center", padding: "32px 0", color: C.textDim, fontSize: 13 }}>
-              All items have been reviewed.
-              <button onClick={() => setShowAddItem(true)} style={{ marginLeft: 10, color: C.accent, background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>＋ Propose a new item</button>
-            </div>
-          )}
         </div>
       )}
-
     </div>
   );
 }
