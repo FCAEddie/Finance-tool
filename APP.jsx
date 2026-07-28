@@ -35,7 +35,7 @@ const PLAN_2026 = {
 
 // ─── Constants & Config ───────────────────────────────────────────────────────
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const ACTUALS_THRU = 5; // Jan–May (index 0–4) are actual; index 5+ are projections
+const ACTUALS_THRU = 5; // Jan–Jun (index 0–5) are actual; index 6+ are projections
 const YEARS = [2026, 2027, 2028, 2029, 2030];
 
 // ─── Utility Helpers ──────────────────────────────────────────────────────────
@@ -67,8 +67,8 @@ const isInPeriod = (item, year, monthIdx) => {
 const getLeafEffective = (row, year, monthIdx, projOverrides, approvedItems, rolledItems) => {
   if (isActualMonth(year, monthIdx)) return getRowData(row, year)?.[monthIdx] ?? 0;
 
-  // UNIFIED_PL v26 only has actuals (Jan–May); projected months are null.
-  // Fall back to the Jan–May average so projections start from a realistic baseline.
+  // UNIFIED_PL v26 only has actuals (Jan–Jun); projected months are null.
+  // Fall back to the Jan–Jun average so projections start from a realistic baseline.
   let base = getRowData(row, year)?.[monthIdx];
   if ((base === null || base === undefined) && year === 2026) {
     const acts = (row.v26 || []).slice(0, ACTUALS_THRU + 1).filter(v => v != null);
@@ -425,7 +425,7 @@ function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
         {[
           { label: "YTD Actual Revenue", value: ytdActual, sub: `Jan–${MONTHS[ACTUALS_THRU]} ${year}` },
-          { label: year === 2026 ? "YTD Plan" : "FY Projected", value: year === 2026 ? ytdPlan : fyTotal, sub: year === 2026 ? "Jan–May 2026 Plan" : `${year} Full Year` },
+          { label: year === 2026 ? "YTD Plan" : "FY Projected", value: year === 2026 ? ytdPlan : fyTotal, sub: year === 2026 ? `Jan–${MONTHS[ACTUALS_THRU]} 2026 Plan` : `${year} Full Year` },
           { label: "YTD Variance $", value: year === 2026 ? ytdVariance : null, sub: year === 2026 ? (ytdVariancePct >= 0 ? "Ahead of Plan" : "Behind Plan") : "N/A (no plan)" },
           { label: "YTD Variance %", value: null, sub: year === 2026 ? `${ytdVariancePct >= 0 ? "+" : ""}${ytdVariancePct.toFixed(1)}%` : "N/A", special: year === 2026 ? ytdVariancePct : null },
         ].map((k, i) => (
@@ -486,7 +486,7 @@ function RevVsPlan({ projOverrides, approvedItems, rolledItems }) {
       <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: `1px solid ${C.cardBorder}`, display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ color: C.actual, fontWeight: 600, fontSize: 15 }}>Monthly Detail</span>
-          {year === 2026 && <span style={{ color: C.textDim, fontSize: 11 }}>2026 — Jan–{MONTHS[ACTUALS_THRU]} are locked actuals; Jun–Dec are projections</span>}
+          {year === 2026 && <span style={{ color: C.textDim, fontSize: 11 }}>2026 — Jan–{MONTHS[ACTUALS_THRU]} are locked actuals; Jul–Dec are projections</span>}
           {year !== 2026 && <span style={{ color: C.textDim, fontSize: 11 }}>{year} — all months are projections (no plan available)</span>}
         </div>
         <div style={{ overflowX: "auto" }}>
@@ -731,7 +731,7 @@ function Dashboard({ onNav, projOverrides, approvedItems, rolledItems, adjOverri
       <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:28, gap:20 }}>
         <div>
           <h1 style={{ margin:0, fontSize:26, fontWeight:700, color:C.actual, letterSpacing:"-0.02em", lineHeight:1.2 }}>Financial Overview</h1>
-          <p style={{ margin:"6px 0 0", fontSize:13.5, color:C.textDim }}>Fiscal Year 2026 &middot; Actuals through May &middot; Live data</p>
+          <p style={{ margin:"6px 0 0", fontSize:13.5, color:C.textDim }}>Fiscal Year 2026 &middot; Actuals through Jun &middot; Live data</p>
         </div>
         <div style={{ display:"flex", gap:10, flexShrink:0 }}>
           <button style={{ display:"flex", alignItems:"center", gap:7, background:C.card, border:`1px solid ${C.cardBorder}`,
@@ -993,7 +993,7 @@ function FullPL({ onNav, approvedItems, projOverrides, setProjOverrides, rolledI
         </div>
       </div>
       <div style={{ fontSize: 11, color: C.textDim }}>
-        <span style={{ color: C.actual }}>■</span> Actuals (Jan–May 2026) &nbsp;&nbsp;
+        <span style={{ color: C.actual }}>■</span> Actuals (Jan–Jun 2026) &nbsp;&nbsp;
         <span style={{ color: C.projection }}>■</span> Projections &nbsp;&nbsp;
         Click any cell to see detail
       </div>
@@ -3355,6 +3355,7 @@ function AIChat() {
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [financeOpen, setFinanceOpen] = useState(false);
   const [page, setPage] = useState("dashboard");
   const [projOverrides, setProjOverrides] = useState({});
   const projHistory = React.useRef([]);                     // undo stack
@@ -3423,12 +3424,13 @@ function App() {
     { id: "rev-vs-plan", label: "Revenue vs Plan",     icon: TrendingUp },
     { id: "avb-summary", label: "Actuals vs Budget",   icon: BarChart2, sub: "Summary" },
     { id: "avb-detail",  label: "Actuals vs Budget",   icon: BarChart2, sub: "Detail" },
-    { id: "fullpl",      label: "Full P&L",            icon: TableProperties },
-    { id: "projections", label: "Projections",         icon: TrendingUp },
+    { id: "adj-ebitda",  label: "Adj. EBITDA",         icon: TrendingUp },
     { id: "scenarios",   label: "Scenarios",           icon: Sliders },
-    { id: "adj-ebitda",    label: "Adj. EBITDA",         icon: TrendingUp },
-  { id: "transactions",  label: "Transactions",         icon: Receipt },
-  { id: "yoy",           label: "Year Over Year",       icon: TrendingUp },
+    { id: "yoy",         label: "Year Over Year",       icon: TrendingUp },
+    { id: "finance-group", label: "Finance",           icon: TableProperties, isGroup: true },
+    { id: "fullpl",      label: "Full P&L",            icon: TableProperties, group: "finance" },
+    { id: "projections", label: "Projections",         icon: TrendingUp,      group: "finance" },
+    { id: "transactions",label: "Transactions",        icon: Receipt,         group: "finance" },
   ];
 
   return (
@@ -3466,21 +3468,45 @@ function App() {
 
         {/* Nav items */}
         <nav style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-          {navItems.map(({ id, label, icon: Icon, sub }) => {
+          {navItems.map(({ id, label, icon: Icon, sub, isGroup, group }) => {
+            // Finance group toggle button
+            if (isGroup && id === "finance-group") {
+              const groupActive = ["fullpl","projections","transactions"].includes(page);
+              return (
+                <button key={id} onClick={() => setFinanceOpen(o => !o)} style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  padding: "9px 16px",
+                  background: groupActive ? C.sidebarActiveBg : "transparent",
+                  color: groupActive ? C.sidebarActiveFg : C.textDim,
+                  border: "none", borderLeft: groupActive ? `3px solid ${C.accent}` : "3px solid transparent",
+                  cursor: "pointer", textAlign: "left", transition: "all 0.15s"
+                }}>
+                  <Icon size={17} style={{ flexShrink: 0 }} />
+                  {sidebarOpen && (
+                    <>
+                      <div style={{ flex: 1, fontSize: 12, fontWeight: groupActive ? 600 : 400, whiteSpace: "nowrap" }}>{label}</div>
+                      <ChevronDown size={13} style={{ flexShrink: 0, transition: "transform 0.2s", transform: financeOpen ? "rotate(180deg)" : "none", opacity: 0.6 }} />
+                    </>
+                  )}
+                </button>
+              );
+            }
+            // Finance child items — only show when open
+            if (group === "finance" && !financeOpen) return null;
             const isActive = page === id;
             return (
               <button key={id} onClick={() => handleNav(id)} style={{
                 width: "100%", display: "flex", alignItems: "center", gap: 10,
-                padding: sidebarOpen ? "9px 16px" : "9px 16px",
+                padding: group === "finance" && sidebarOpen ? "7px 16px 7px 36px" : "9px 16px",
                 background: isActive ? C.sidebarActiveBg : "transparent",
                 color: isActive ? C.sidebarActiveFg : C.textDim,
                 border: "none", borderLeft: isActive ? `3px solid ${C.accent}` : "3px solid transparent",
                 cursor: "pointer", textAlign: "left", transition: "all 0.15s"
               }}>
-                <Icon size={17} style={{ flexShrink: 0 }} />
+                <Icon size={group === "finance" ? 14 : 17} style={{ flexShrink: 0 }} />
                 {sidebarOpen && (
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: isActive ? 600 : 400, whiteSpace: "nowrap" }}>{label}</div>
+                    <div style={{ fontSize: group === "finance" ? 11 : 12, fontWeight: isActive ? 600 : 400, whiteSpace: "nowrap" }}>{label}</div>
                     {sub && <div style={{ fontSize: 10, opacity: 0.65, marginTop: 1 }}>{sub}</div>}
                   </div>
                 )}
