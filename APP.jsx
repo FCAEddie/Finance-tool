@@ -1422,7 +1422,7 @@ function Projections({ projOverrides, setProjOverrides, undoProj, redoProj, proj
       <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 16px",
         display: "flex", alignItems: "center", gap: 8 }}>
         <Info size={14} style={{ color: C.projection, flexShrink: 0 }} />
-        <span style={{ color: C.textDim, fontSize: 12 }}>Projections based on 2026 Plan (Jun–Dec) and historical trend analysis. Data sourced from UNIFIED_PL plan arrays.</span>
+        <span style={{ color: C.textDim, fontSize: 12 }}><span style={{ fontWeight: 600, color: C.actual }}>🔒 Jan–Jun are locked actuals</span> (from QuickBooks) · Jul–Dec are editable projections</span>
       </div>
 
       {saveFeedback && (
@@ -1438,9 +1438,10 @@ function Projections({ projOverrides, setProjOverrides, undoProj, redoProj, proj
             <thead>
               <tr style={{ background: C.bg, borderBottom: `1px solid ${C.cardBorder}` }}>
                 <th style={{ textAlign: "left", padding: "10px 12px", color: C.textDim, width: 260 }}>Account</th>
-                {MONTHS.map(m => (
-                  <th key={m} style={{ textAlign: "right", padding: "10px 8px", color: C.projection, minWidth: 80 }}>{m}</th>
-                ))}
+                {MONTHS.map((m, mi) => {
+                  const isActHdr = isActualMonth(year, mi);
+                  return <th key={m} style={{ textAlign: "right", padding: "10px 8px", color: isActHdr ? C.actual : C.projection, minWidth: 80, borderBottom: isActHdr ? "2px solid " + C.actual + "33" : undefined }}>{m}{isActHdr ? " 🔒" : ""}</th>;
+                })}
                 <th style={{ textAlign: "right", padding: "10px 8px", color: C.textDim, minWidth: 80 }}>Annual</th>
                 <th style={{ textAlign: "center", padding: "10px 8px", color: C.textDim, width: 60 }}>Edit</th>
               </tr>
@@ -1468,7 +1469,7 @@ function Projections({ projOverrides, setProjOverrides, undoProj, redoProj, proj
                       return (
                         <td key={mi} style={{ textAlign: "right", padding: "6px 4px",
                           color: isAct ? C.actual : C.projection,
-                          background: hasOverride ? "rgba(245,158,11,0.08)" : "transparent" }}>
+                          background: isAct ? `${C.cardBorder}22` : hasOverride ? "rgba(245,158,11,0.08)" : "transparent" }}>
                           {isEditingThis && !isAct ? (
                             <input type="number" defaultValue={effVal}
                               onBlur={e => {
@@ -1559,7 +1560,7 @@ function Projections({ projOverrides, setProjOverrides, undoProj, redoProj, proj
   );
 }
 
-// ─── Page: Actuals vs Budget – Summary ───────────────────────────────────────
+// ─── Page: Actuals vs Plan – Summary ───────────────────────────────────────
 function AvBSummary({ projOverrides, approvedItems, rolledItems }) {
   const C = useC();
   const live26 = useMemo(() =>
@@ -1656,7 +1657,7 @@ function AvBSummary({ projOverrides, approvedItems, rolledItems }) {
   );
 }
 
-// ─── Page: Actuals vs Budget – Detail ────────────────────────────────────────
+// ─── Page: Actuals vs Plan – Detail ────────────────────────────────────────
 function AvBDetail({ projOverrides, approvedItems, rolledItems }) {
   const C = useC();
   const [selMonth, setSelMonth] = useState(0); // default Jan
@@ -1828,41 +1829,72 @@ function AvBDetail({ projOverrides, approvedItems, rolledItems }) {
 }
 
 // ─── Page: Transactions ───────────────────────────────────────────────────────
-function Transactions({ filterAccount, filterMonth }) {
+function Transactions() {
   const C = useC();
-  const [glFilter, setGlFilter] = useState(filterAccount || "");
-  const [selMonth, setSelMonth] = useState(filterMonth != null ? filterMonth : -1);
-  const [sortKey, setSortKey] = useState("d");
+  const fmtTx = v => "$" + Math.round(Math.abs(v)).toLocaleString("en-US");
 
-  React.useEffect(() => {
-    if (filterAccount) setGlFilter(filterAccount);
-    if (filterMonth != null && filterMonth >= 0) setSelMonth(filterMonth);
-  }, [filterAccount, filterMonth]);
+  // Total GL groups from UNIFIED_PL with numeric codes (e.g. "Total 605000 ...")
+  const totalGroups = useMemo(() =>
+    UNIFIED_PL.filter(r => /^Total \d/.test(r.a)), []);
+
+  const [selectedGroup, setSelectedGroup] = useState("");
+  const [selectedGL, setSelectedGL] = useState(null);
+  const [selMonth, setSelMonth] = useState(-1);
+  const [sortKey, setSortKey] = useState("d");
   const [sortDir, setSortDir] = useState(-1);
-  const [page, setPage] = useState(0);
+  const [txPage, setTxPage] = useState(0);
   const PAGE_SIZE = 100;
 
-  const uniqueGLs = useMemo(() => [...new Set(TRANSACTIONS.map(t => t.g))].sort(), []);
-  
-  const filtered = useMemo(() => {
-    let rows = TRANSACTIONS;
-    if (glFilter) rows = rows.filter(t => t.g.toLowerCase().includes(glFilter.toLowerCase()));
+  // Extract 5-6 digit GL prefix from an account name
+  const glPrefix = (a) => (/^\d{5,6}/.exec(a) || [])[0] || "";
+
+  // Leaf GL rows under the selected total group
+  const subCategories = useMemo(() => {
+    if (!selectedGroup) return [];
+    const idx = UNIFIED_PL.findIndex(r => r.a === selectedGroup);
+    if (idx < 0) return [];
+    const parentIndent = UNIFIED_PL[idx].i;
+    const result = [];
+    for (let i = idx + 1; i < UNIFIED_PL.length; i++) {
+      if (UNIFIED_PL[i].i <= parentIndent) break;
+      if (isLeafGL(UNIFIED_PL[i].a)) result.push(UNIFIED_PL[i]);
+    }
+    return result;
+  }, [selectedGroup]);
+
+  // Totals per sub-category GL prefix from TRANSACTIONS
+  const subTotals = useMemo(() => {
+    if (!selectedGroup) return {};
+    const codes = new Set(subCategories.map(r => glPrefix(r.a)));
+    const totals = {};
+    TRANSACTIONS.forEach(t => {
+      const code = glPrefix(t.g);
+      if (codes.has(code)) { totals[code] = (totals[code] || 0) + t.a; }
+    });
+    return totals;
+  }, [selectedGroup, subCategories]);
+
+  // Transactions for selected sub-category or all subs if none selected
+  const filteredTx = useMemo(() => {
+    if (!selectedGroup) return [];
+    const targetCodes = selectedGL
+      ? new Set([glPrefix(selectedGL)])
+      : new Set(subCategories.map(r => glPrefix(r.a)));
+    let rows = TRANSACTIONS.filter(t => targetCodes.has(glPrefix(t.g)));
     if (selMonth >= 0) rows = rows.filter(t => t.m === selMonth);
-    rows = [...rows].sort((a,b) => {
+    return [...rows].sort((a, b) => {
       const av = a[sortKey], bv = b[sortKey];
       if (typeof av === "number") return (av - bv) * sortDir;
       return String(av).localeCompare(String(bv)) * sortDir;
     });
-    return rows;
-  }, [glFilter, selMonth, sortKey, sortDir]);
+  }, [selectedGroup, selectedGL, subCategories, selMonth, sortKey, sortDir]);
 
-  const paged = filtered.slice(page * PAGE_SIZE, (page+1) * PAGE_SIZE);
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const totalAmount = filtered.reduce((s,t) => s + t.a, 0);
+  const paged = filteredTx.slice(txPage * PAGE_SIZE, (txPage + 1) * PAGE_SIZE);
+  const totalPages = Math.ceil(filteredTx.length / PAGE_SIZE);
+  const totalAmt = filteredTx.reduce((s, t) => s + t.a, 0);
+  const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-  const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May"];
-
-  const thStyle = (key) => ({
+  const thS = (key) => ({
     padding: "10px 12px", textAlign: key === "a" ? "right" : "left",
     color: sortKey === key ? C.actual : C.textDim, fontWeight: 600, fontSize: 12,
     cursor: "pointer", userSelect: "none", borderBottom: `1px solid ${C.cardBorder}`,
@@ -1873,76 +1905,127 @@ function Transactions({ filterAccount, filterMonth }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <h2 style={{ color: C.actual, margin: 0, fontSize: 20, fontWeight: 700 }}>Transactions</h2>
 
+      {/* Step 1 — Select GL Group */}
       <Card>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: 12, alignItems: "end" }}>
-          <div>
-            <label style={{ color: C.textDim, fontSize: 12, display: "block", marginBottom: 4 }}>Filter by GL Account</label>
-            <input value={glFilter} onChange={e => { setGlFilter(e.target.value); setPage(0); }}
-              list="gl-list" placeholder="Type to filter GL accounts..."
-              style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 8,
-                color: C.actual, padding: "8px 12px", fontSize: 13, boxSizing: "border-box" }} />
-            <datalist id="gl-list">
-              {uniqueGLs.map(g => <option key={g} value={g} />)}
-            </datalist>
-          </div>
-          <div>
-            <label style={{ color: C.textDim, fontSize: 12, display: "block", marginBottom: 4 }}>Month</label>
-            <select value={selMonth} onChange={e => { setSelMonth(parseInt(e.target.value)); setPage(0); }}
-              style={{ width: "100%", background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 8,
-                color: C.actual, padding: "8px 12px", fontSize: 13 }}>
-              <option value={-1}>All Months</option>
-              {MONTH_NAMES.map((m,i) => <option key={m} value={i}>{m} 2026</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={{ marginTop: 8, fontSize: 12, color: C.textDim }}>
-          Showing {filtered.length.toLocaleString()} transactions — Total: <span style={{ color: totalAmount >= 0 ? C.positive : C.negative, fontWeight: 600 }}>{fmt(Math.abs(totalAmount))}</span>
-        </div>
-      </Card>
-
-      <Card style={{ padding: 0 }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={thStyle("m")} onClick={() => { setSortKey("m"); setSortDir(d => sortKey==="m"?-d:1); }}>Month</th>
-                <th style={thStyle("d")} onClick={() => { setSortKey("d"); setSortDir(d => sortKey==="d"?-d:1); }}>Date</th>
-                <th style={thStyle("g")} onClick={() => { setSortKey("g"); setSortDir(d => sortKey==="g"?-d:1); }}>GL Account</th>
-                <th style={thStyle("v")} onClick={() => { setSortKey("v"); setSortDir(d => sortKey==="v"?-d:1); }}>Vendor / Name</th>
-                <th style={{ ...thStyle("a"), textAlign: "right" }} onClick={() => { setSortKey("a"); setSortDir(d => sortKey==="a"?-d:1); }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paged.map((t, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}22`,
-                  background: i % 2 === 0 ? "transparent" : `${C.cardBorder}11` }}>
-                  <td style={{ padding: "8px 12px", color: C.textDim, fontSize: 12 }}>{MONTH_NAMES[t.m]}</td>
-                  <td style={{ padding: "8px 12px", color: C.textDim, fontSize: 12 }}>{t.d}</td>
-                  <td style={{ padding: "8px 12px", color: C.text, fontSize: 12, maxWidth: 220 }}>{t.g}</td>
-                  <td style={{ padding: "8px 12px", color: C.text, fontSize: 12, maxWidth: 220 }}>{t.v || "—"}</td>
-                  <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 12,
-                    color: t.a >= 0 ? C.text : C.negative, fontWeight: 500 }}>
-                    {t.a >= 0 ? fmt(t.a) : `(${fmt(-t.a)})`}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {totalPages > 1 && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 12, borderTop: `1px solid ${C.cardBorder}` }}>
-            <button onClick={() => setPage(p => Math.max(0, p-1))} disabled={page === 0}
-              style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: "transparent", color: C.text, cursor: page===0?"default":"pointer", opacity: page===0?0.4:1 }}>
-              ← Prev
-            </button>
-            <span style={{ color: C.textDim, fontSize: 12 }}>Page {page+1} of {totalPages}</span>
-            <button onClick={() => setPage(p => Math.min(totalPages-1, p+1))} disabled={page===totalPages-1}
-              style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: "transparent", color: C.text, cursor: page===totalPages-1?"default":"pointer", opacity: page===totalPages-1?0.4:1 }}>
-              Next →
-            </button>
+        <label style={{ color: C.textDim, fontSize: 12, display: "block", marginBottom: 6, fontWeight: 600 }}>Select GL Group</label>
+        <select value={selectedGroup}
+          onChange={e => { setSelectedGroup(e.target.value); setSelectedGL(null); setTxPage(0); }}
+          style={{ width: "100%", background: C.bg, border: `1px solid ${selectedGroup ? C.accent : C.cardBorder}`, borderRadius: 8,
+            color: selectedGroup ? C.actual : C.textDim, padding: "10px 14px", fontSize: 13 }}>
+          <option value="">— Select a Total GL code to drill in —</option>
+          {totalGroups.map(r => <option key={r.a} value={r.a}>{r.a}</option>)}
+        </select>
+        {selectedGroup && (
+          <div style={{ marginTop: 8, fontSize: 12, color: C.textDim }}>
+            {subCategories.length} sub-categories · {Object.keys(subTotals).length} with transactions
           </div>
         )}
       </Card>
+
+      {/* Step 2 — Sub-categories */}
+      {selectedGroup && subCategories.length > 0 && (
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.cardBorder}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.actual }}>Sub-categories</span>
+            {selectedGL && (
+              <button onClick={() => { setSelectedGL(null); setTxPage(0); }}
+                style={{ fontSize: 11, color: C.accent, background: "none", border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>
+                ← Show all
+              </button>
+            )}
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: C.headerBg }}>
+                <th style={{ padding: "8px 16px", textAlign: "left", color: C.textDim, fontWeight: 600, borderBottom: `1px solid ${C.cardBorder}`, fontSize: 11 }}>GL Account</th>
+                <th style={{ padding: "8px 16px", textAlign: "right", color: C.textDim, fontWeight: 600, borderBottom: `1px solid ${C.cardBorder}`, fontSize: 11 }}>Total (actuals)</th>
+                <th style={{ padding: "8px 16px", textAlign: "center", color: C.textDim, fontWeight: 600, borderBottom: `1px solid ${C.cardBorder}`, fontSize: 11, width: 80 }}>Drill In</th>
+              </tr>
+            </thead>
+            <tbody>
+              {subCategories.map((row, i) => {
+                const code = glPrefix(row.a);
+                const total = subTotals[code] || 0;
+                const active = selectedGL === row.a;
+                return (
+                  <tr key={row.a} onClick={() => { setSelectedGL(active ? null : row.a); setTxPage(0); }}
+                    style={{ borderBottom: `1px solid ${C.cardBorder}22`, cursor: "pointer",
+                      background: active ? C.accentSoft : i % 2 === 0 ? "transparent" : `${C.cardBorder}11` }}>
+                    <td style={{ padding: "9px 16px", color: active ? C.accent : C.text, fontWeight: active ? 600 : 400 }}>{row.a}</td>
+                    <td style={{ padding: "9px 16px", textAlign: "right", color: total < 0 ? C.negative : total > 0 ? C.text : C.textDim, fontWeight: 500 }}>
+                      {total !== 0 ? fmtTx(total) : "—"}
+                    </td>
+                    <td style={{ padding: "9px 16px", textAlign: "center", color: active ? C.accent : C.textDim }}>
+                      {active ? "▼" : "→"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      {/* Step 3 — Transaction detail */}
+      {selectedGroup && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13, color: C.textDim }}>
+              {selectedGL
+                ? <><span style={{ color: C.accent, fontWeight: 600 }}>{selectedGL}</span>{" — "}</>
+                : "All sub-categories — "}
+              <span style={{ color: C.actual, fontWeight: 600 }}>{filteredTx.length.toLocaleString()}</span> transactions
+              {filteredTx.length > 0 && <> · Total: <span style={{ color: totalAmt >= 0 ? C.positive : C.negative, fontWeight: 600, marginLeft: 2 }}>{fmtTx(totalAmt)}</span></>}
+            </div>
+            <select value={selMonth} onChange={e => { setSelMonth(parseInt(e.target.value)); setTxPage(0); }}
+              style={{ background: C.bg, border: `1px solid ${C.cardBorder}`, borderRadius: 8, color: C.actual, padding: "6px 10px", fontSize: 12 }}>
+              <option value={-1}>All Months</option>
+              {MONTH_NAMES.map((m, i) => <option key={m} value={i}>{m} 2026</option>)}
+            </select>
+          </div>
+
+          <Card style={{ padding: 0 }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    {[["d","Date"],["g","GL Account"],["v","Vendor / Name"],["a","Amount"]].map(([key, label]) => (
+                      <th key={key} style={thS(key)} onClick={() => { setSortKey(key); setSortDir(d => sortKey === key ? -d : 1); }}>
+                        {label}{sortKey === key ? (sortDir > 0 ? " ↑" : " ↓") : ""}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTx.length === 0 ? (
+                    <tr><td colSpan={4} style={{ padding: 24, textAlign: "center", color: C.textDim, fontSize: 13 }}>
+                      {selectedGroup ? "No transactions found for this GL group" : "Select a GL group above"}
+                    </td></tr>
+                  ) : paged.map((t, i) => (
+                    <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}22`, background: i % 2 === 0 ? "transparent" : `${C.cardBorder}11` }}>
+                      <td style={{ padding: "8px 12px", color: C.textDim, fontSize: 12, whiteSpace: "nowrap" }}>{t.d}</td>
+                      <td style={{ padding: "8px 12px", color: C.text, fontSize: 12, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.g}</td>
+                      <td style={{ padding: "8px 12px", color: C.text, fontSize: 12, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{t.v || "—"}</td>
+                      <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: t.a >= 0 ? C.text : C.negative, fontWeight: 500 }}>
+                        {t.a >= 0 ? fmtTx(t.a) : `(${fmtTx(-t.a)})`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 12, borderTop: `1px solid ${C.cardBorder}` }}>
+                <button onClick={() => setTxPage(p => Math.max(0, p - 1))} disabled={txPage === 0}
+                  style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: "transparent", color: C.text, cursor: txPage === 0 ? "default" : "pointer", opacity: txPage === 0 ? 0.4 : 1 }}>← Prev</button>
+                <span style={{ color: C.textDim, fontSize: 12 }}>Page {txPage + 1} of {totalPages}</span>
+                <button onClick={() => setTxPage(p => Math.min(totalPages - 1, p + 1))} disabled={txPage === totalPages - 1}
+                  style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${C.cardBorder}`, background: "transparent", color: C.text, cursor: txPage === totalPages - 1 ? "default" : "pointer", opacity: txPage === totalPages - 1 ? 0.4 : 1 }}>Next →</button>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
     </div>
   );
 }
@@ -2157,6 +2240,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
   const [activeView, setActiveView] = React.useState(null); // null | "pending" | "pushed" | "declined"
   const [deferTarget, setDeferTarget] = React.useState(null); // { id, month, year }
   const [newItemType, setNewItemType] = React.useState("recurring");
+  const [plOpen, setPlOpen] = React.useState(true);
 
   const SCENARIO_DEFS = [
     { id: "base",       name: "Base",          color: "#3B6D11" },
@@ -2571,11 +2655,14 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
               <>
                 {/* P&L Snapshot */}
                 <div style={card}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: plOpen ? 12 : 0, cursor:"pointer" }} onClick={()=>setPlOpen(o=>!o)}>
                     <span style={{ fontSize:13, fontWeight:600, color:C.actual }}>2026 P&amp;L Snapshot</span>
-                    <span style={{ fontSize:11, color:C.textDim }}>Actuals Jan–May · Projections include approved items</span>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <span style={{ fontSize:11, color:C.textDim }}>Actuals Jan–Jun · Projections include approved items</span>
+                      <ChevronDown size={13} style={{ transition:"transform 0.2s", transform:plOpen?"rotate(180deg)":"none", opacity:0.5 }} />
+                    </div>
                   </div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:0, fontSize:12 }}>
+                  {plOpen && <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:0, fontSize:12 }}>
                     <div style={{ padding:"6px 10px", color:C.textDim, fontWeight:600, fontSize:11, borderBottom:`2px solid ${C.cardBorder}` }}></div>
                     {["Plan","Actuals (YTD)","Proj + Approved"].map(h=>(
                       <div key={h} style={{ padding:"6px 10px", textAlign:"right", color:h==="Proj + Approved"?C.accent:C.textDim, fontWeight:600, fontSize:11, borderBottom:`2px solid ${C.cardBorder}` }}>{h}</div>
@@ -2588,7 +2675,7 @@ function Scenarios({ wishList, setWishList, approvedIds, setApprovedIds, rolledI
                         <div style={{ padding:"8px 10px", textAlign:"right", color:C.accent, fontWeight:row.bold?700:500, background:row.bold?C.accentSoft:"transparent", borderBottom:`1px solid ${C.cardBorder}33` }}>{fmtM(row.pr)}</div>
                       </React.Fragment>
                     ))}
-                  </div>
+                  </div>}
                 </div>
 
                 {/* Priority summaries */}
@@ -3422,15 +3509,15 @@ function App() {
   const navItems = [
     { id: "dashboard",   label: "Dashboard",          icon: LayoutDashboard },
     { id: "rev-vs-plan", label: "Revenue vs Plan",     icon: TrendingUp },
-    { id: "avb-summary", label: "Actuals vs Budget",   icon: BarChart2, sub: "Summary" },
-    { id: "avb-detail",  label: "Actuals vs Budget",   icon: BarChart2, sub: "Detail" },
-    { id: "adj-ebitda",  label: "Adj. EBITDA",         icon: TrendingUp },
+    { id: "avb-summary", label: "Actuals vs Plan",     icon: BarChart2, sub: "Summary" },
+    { id: "avb-detail",  label: "Actuals vs Plan",     icon: BarChart2, sub: "Detail" },
     { id: "scenarios",   label: "Scenarios",           icon: Sliders },
     { id: "yoy",         label: "Year Over Year",       icon: TrendingUp },
     { id: "finance-group", label: "Finance",           icon: TableProperties, isGroup: true },
     { id: "fullpl",      label: "Full P&L",            icon: TableProperties, group: "finance" },
     { id: "projections", label: "Projections",         icon: TrendingUp,      group: "finance" },
-    { id: "transactions",label: "Transactions",        icon: Receipt,         group: "finance" },
+    { id: "adj-ebitda",   label: "Adj. EBITDA",        icon: TrendingUp,      group: "finance" },
+    { id: "transactions", label: "Transactions",       icon: Receipt,         group: "finance" },
   ];
 
   return (
@@ -3471,7 +3558,7 @@ function App() {
           {navItems.map(({ id, label, icon: Icon, sub, isGroup, group }) => {
             // Finance group toggle button
             if (isGroup && id === "finance-group") {
-              const groupActive = ["fullpl","projections","transactions"].includes(page);
+              const groupActive = ["fullpl","projections","transactions","adj-ebitda"].includes(page);
               return (
                 <button key={id} onClick={() => setFinanceOpen(o => !o)} style={{
                   width: "100%", display: "flex", alignItems: "center", gap: 10,
